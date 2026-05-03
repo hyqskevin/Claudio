@@ -35,23 +35,23 @@
 ## Current Features
 - AI-powered music planning (Claude generates playlists based on context)
 - NCM song search and playback with real audio streaming
-- DJ TTS messages between songs
-- LRC/karaoke lyrics display
-- 6 audio visualization modes
-- Playlist CRUD
-- NCM playlist browsing
-- Play history tracking
+- DJ TTS messages between songs (DjMessages + ChatArea)
+- LRC/karaoke lyrics display (KaraokeLyrics + LyricsPanel)
+- 6 audio visualization modes (AudioVisualizer + AudioSpectrum)
+- Playlist CRUD + NCM playlist browsing
+- Play history tracking with real DB stats
+- Song favorite/like system
+- Volume control, shuffle/repeat modes
+- Keyboard shortcuts + MediaSession API (lock screen/earphone controls)
+- Toast notification system + loading skeletons
+- MiniPlayer bottom bar
 - Bilingual (EN/ZH) i18n
 - PWA with service worker
+- Profile page with real play stats (top artists, minutes listened, favorites)
 
 ## Known Gaps (to fix)
-- No volume control UI (AudioPlayer.setVolume exists but no slider)
-- No shuffle/repeat modes
-- No song search from frontend
-- No keyboard/media key shortcuts
-- No toast notification system
-- No loading skeletons
-- MiniPlayer exists but not wired into layout
+- /api/now and /api/player use mock queue (Task 1 in progress)
+- WebSocket events not fully wired (Task 2 in progress)
+- Scheduler cron tasks are stubs (Task 2 in progress)
 - No drag-to-reorder queue
-- No song like/favorite system
-- No recently played history page
+- No UPnP casting
