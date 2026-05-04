@@ -8,6 +8,7 @@ interface Particle {
   size: number;
   life: number;
   color: string;
+  trail: { x: number; y: number; alpha: number }[];
 }
 
 let burstRef: ((x: number, y: number, color?: string) => void) | null = null;
@@ -37,6 +38,7 @@ export default function ParticleCanvas() {
         size: 2 + Math.random() * 3,
         life: 1.0,
         color: color ?? "#5ee8c5",
+        trail: [],
       });
     }
   }, []);
@@ -57,12 +59,15 @@ export default function ParticleCanvas() {
       canvas.height = window.innerHeight;
     }
 
-    // 半透明黑色覆盖产生拖尾效果，比 clearRect 更高效
-    ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Clear canvas — trail effect via per-particle trail history, NOT by overlaying black
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const alive: Particle[] = [];
     for (const p of particlesRef.current) {
+      // Save current position to trail (keep last 5 positions)
+      p.trail.push({ x: p.x, y: p.y, alpha: p.life * 0.3 });
+      if (p.trail.length > 5) p.trail.shift();
+
       p.x += p.vx;
       p.y += p.vy;
       p.vy += 0.05; // gravity
@@ -70,6 +75,16 @@ export default function ParticleCanvas() {
 
       if (p.life <= 0) continue;
 
+      // Draw trail
+      for (const t of p.trail) {
+        ctx.globalAlpha = t.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, p.size * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Draw particle
       ctx.globalAlpha = p.life;
       ctx.fillStyle = p.color;
       ctx.beginPath();
