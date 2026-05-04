@@ -85,12 +85,7 @@ export default function SongCard({
               const img = e.currentTarget;
               if (!img.dataset.retried) {
                 img.dataset.retried = "1";
-                fetch(`/api/song/cover?id=${encodeURIComponent(songId)}`)
-                  .then((r) => (r.ok ? r.json() : null))
-                  .then((data) => {
-                    if (data?.coverUrl) img.src = data.coverUrl;
-                  })
-                  .catch(() => {});
+                img.src = `/api/song/cover?id=${encodeURIComponent(songId)}`;
               }
             }}
           />

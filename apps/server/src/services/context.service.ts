@@ -1,5 +1,6 @@
 import type { WeatherService } from "./weather.service.js";
 import type { CalendarService } from "./calendar.service.js";
+import type { ProfileService } from "./profile.service.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +19,8 @@ interface PlayRecord {
 export class ContextService {
   constructor(
     private weather: WeatherService,
-    private calendar: CalendarService
+    private calendar: CalendarService,
+    private profile?: ProfileService
   ) {}
 
   async buildContext(input?: string, scene?: string): Promise<string> {
@@ -72,6 +74,20 @@ export class ContextService {
       } catch {
         // file not found, skip
       }
+    }
+
+    // Inject user profile summary
+    if (this.profile) {
+      try {
+        const summary = this.profile.getProfileSummary();
+        if (summary) {
+          parts.push(`【用户画像】\n${summary}`);
+        }
+        const hasRecommended = await this.profile.hasRecommendedToday();
+        if (!hasRecommended) {
+          parts.push(`【每日推荐指令】这是今天用户第一次和你对话，请在回复中主动推荐3首适合今天听的歌曲，结合当前天气和用户画像。推荐后可以说一些猫娘风格的关心话语。`);
+        }
+      } catch {}
     }
 
     if (input) {

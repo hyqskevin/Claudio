@@ -2,23 +2,15 @@ import { useEffect, useRef, useCallback } from "react";
 import { audioPlayer } from "../audio/AudioPlayer";
 
 const BAR_COUNT = 64;
+const SOURCE_BARS = 32;
 
 interface Props {
   active: boolean;
 }
 
-function toRgba(color: string, alpha: number): string {
-  const m = color.match(/^#([0-9a-f]{6})$/i);
-  if (m) {
-    const r = parseInt(m[1], 16) >> 16;
-    const g = (parseInt(m[1], 16) >> 8) & 0xff;
-    const b = parseInt(m[1], 16) & 0xff;
-    return `rgba(${r},${g},${b},${alpha})`;
-  }
-  if (color.startsWith("rgb(")) {
-    return color.replace("rgb(", "rgba(").replace(")", `,${alpha})`);
-  }
-  return `rgba(94,232,197,${alpha})`;
+function hslColor(ratio: number, alpha: number): string {
+  const hue = 270 + (170 - 270) * ratio;
+  return `hsla(${hue}, 80%, 60%, ${alpha})`;
 }
 
 export default function SpectrumBars({ active }: Props) {
@@ -26,9 +18,9 @@ export default function SpectrumBars({ active }: Props) {
   const animFrameRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const freqDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const barsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
-  const peaksRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
-  const peakHoldRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
+  const barsRef = useRef<number[]>(new Array(SOURCE_BARS).fill(0));
+  const peaksRef = useRef<number[]>(new Array(SOURCE_BARS).fill(0));
+  const peakHoldRef = useRef<number[]>(new Array(SOURCE_BARS).fill(0));
 
   const setupAudio = useCallback(() => {
     if (analyserRef.current) return;
@@ -66,12 +58,12 @@ export default function SpectrumBars({ active }: Props) {
     resize();
     window.addEventListener("resize", resize);
 
-    // Pre-compute log mapping table
+    // Log frequency mapping
     const logMap: number[] = [];
-    for (let i = 0; i < BAR_COUNT; i++) {
+    for (let i = 0; i < SOURCE_BARS; i++) {
       const minLog = Math.log10(1);
-      const maxLog = Math.log10(512); // 1024 fftSize → 512 bins
-      logMap.push(Math.pow(10, minLog + (maxLog - minLog) * (i / BAR_COUNT)));
+      const maxLog = Math.log10(512);
+      logMap.push(Math.pow(10, minLog + (maxLog - minLog) * (i / SOURCE_BARS)));
     }
 
     const draw = () => {
@@ -86,72 +78,92 @@ export default function SpectrumBars({ active }: Props) {
       const peakHold = peakHoldRef.current;
       const t = performance.now();
 
-      const style = getComputedStyle(document.documentElement);
-      const primaryColor = style.getPropertyValue("--color-primary").trim() || "#5ee8c5";
-
       const barWidth = w / BAR_COUNT;
       const gap = 1;
+      const mainHeight = h * 0.7;
 
       // Get frequency data once per frame
       if (active && analyser && freqData) {
         analyser.getByteFrequencyData(freqData);
       }
 
-      for (let i = 0; i < BAR_COUNT; i++) {
+      for (let i = 0; i < SOURCE_BARS; i++) {
         let target: number;
         if (active && freqData) {
-          // Logarithmic frequency mapping
           const idx = Math.min(Math.floor(logMap[i]), freqData.length - 1);
-          // Perceptual bass boost
-          const ratio = i / BAR_COUNT;
+          const ratio = i / SOURCE_BARS;
           const boost = 1.0 + Math.pow(1.0 - ratio, 2.0) * 1.5;
           target = Math.min(1, (freqData[idx] || 0) / 255 * boost);
         } else {
-          // Idle animation — multi-layered sine for organic feel
-          target = 0.12 + 0.08 * Math.sin(t * 0.002 + i * 0.3) * (0.5 + 0.5 * Math.sin(t * 0.001));
+          // Idle: multi-layer sine breathing
+          target =
+            0.1 +
+            0.06 * Math.sin(t * 0.0015 + i * 0.25) *
+            (0.5 + 0.5 * Math.sin(t * 0.0008 + i * 0.15)) +
+            0.04 * Math.sin(t * 0.003 + i * 0.4);
         }
 
-        // Fast attack (0.65), medium release (0.25) — pop up, float down
-        bars[i] += (target - bars[i]) * (target > bars[i] ? 0.65 : 0.25);
+        // Fast attack (0.85), slow release (0.08)
+        bars[i] += (target - bars[i]) * (target > bars[i] ? 0.85 : 0.08);
 
-        // Sqrt compression for better dynamic range
-        const barHeight = Math.pow(bars[i], 0.65) * h * 0.88;
-        const x = i * barWidth + gap / 2;
-        const y = h - barHeight;
+        // Sqrt compression
+        const barHeight = Math.pow(bars[i], 0.65) * mainHeight * 0.88;
+        const colorRatio = i / SOURCE_BARS;
 
-        // Glow effect
-        ctx.shadowColor = primaryColor;
-        ctx.shadowBlur = 4 + bars[i] * 10;
+        // Mirror: left side = reversed, right side = normal
+        const leftIdx = SOURCE_BARS - 1 - i;
+        const rightIdx = SOURCE_BARS + i;
 
-        // Color gradient — primary color fading to transparent at bottom
-        const grad = ctx.createLinearGradient(x, h, x, y);
-        grad.addColorStop(0, toRgba(primaryColor, 0.08));
-        grad.addColorStop(0.3, toRgba(primaryColor, 0.25));
-        grad.addColorStop(0.6, toRgba(primaryColor, 0.55));
-        grad.addColorStop(1, toRgba(primaryColor, 0.95));
-        ctx.fillStyle = grad;
+        for (const [barPos, srcIdx] of [[leftIdx, i], [rightIdx, i]] as const) {
+          const x = barPos * barWidth + gap / 2;
+          const y = mainHeight - barHeight;
 
-        // Rounded top caps
-        const radius = Math.min(3, (barWidth - gap) / 2);
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth - gap, barHeight, [radius, radius, 0, 0]);
-        ctx.fill();
+          // Glow
+          ctx.shadowColor = hslColor(colorRatio, 0.8);
+          ctx.shadowBlur = 4 + bars[i] * 12;
 
-        // Reset shadow
-        ctx.shadowBlur = 0;
+          // HSL gradient
+          const grad = ctx.createLinearGradient(x, mainHeight, x, y);
+          grad.addColorStop(0, hslColor(colorRatio, 0.05));
+          grad.addColorStop(0.3, hslColor(colorRatio, 0.2));
+          grad.addColorStop(0.6, hslColor(colorRatio, 0.5));
+          grad.addColorStop(1, hslColor(colorRatio, 0.9));
+          ctx.fillStyle = grad;
 
-        // Peak indicator
-        if (bars[i] > peaks[i]) {
-          peaks[i] = bars[i];
-          peakHold[i] = 30;
-        } else if (peakHold[i] > 0) {
-          peakHold[i]--;
-        } else {
-          peaks[i] *= 0.97;
+          // Rounded top caps
+          const radius = Math.min(3, (barWidth - gap) / 2);
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth - gap, barHeight, [radius, radius, 0, 0]);
+          ctx.fill();
+
+          // Reset shadow
+          ctx.shadowBlur = 0;
+
+          // Bottom mirror reflection (30% height, 30% opacity)
+          if (barHeight > 2) {
+            const reflHeight = barHeight * 0.3;
+            const reflGrad = ctx.createLinearGradient(x, mainHeight, x, mainHeight + reflHeight);
+            reflGrad.addColorStop(0, hslColor(colorRatio, 0.25));
+            reflGrad.addColorStop(1, hslColor(colorRatio, 0));
+            ctx.fillStyle = reflGrad;
+            ctx.beginPath();
+            ctx.roundRect(x, mainHeight, barWidth - gap, reflHeight, [0, 0, radius, radius]);
+            ctx.fill();
+          }
+
+          // Peak hold
+          if (bars[i] > peaks[srcIdx]) {
+            peaks[srcIdx] = bars[i];
+            peakHold[srcIdx] = 40;
+          } else if (peakHold[srcIdx] > 0) {
+            peakHold[srcIdx]--;
+          } else {
+            peaks[srcIdx] *= 0.975;
+          }
+          const peakY = mainHeight - Math.pow(peaks[srcIdx], 0.65) * mainHeight * 0.88;
+          ctx.fillStyle = `rgba(255, 255, 255, 0.5)`;
+          ctx.fillRect(x, Math.max(0, peakY - 2), barWidth - gap, 2);
         }
-        const peakY = h - Math.pow(peaks[i], 0.7) * h * 0.85;
-        ctx.fillStyle = toRgba(primaryColor, 0.6);
-        ctx.fillRect(x, Math.max(0, peakY - 2), barWidth - gap, 2);
       }
 
       animFrameRef.current = requestAnimationFrame(draw);

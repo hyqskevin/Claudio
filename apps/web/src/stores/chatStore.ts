@@ -209,10 +209,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                                     case "reply":
                                         structuredReply = data as StructuredReply;
                                         set({ streamingReply: structuredReply });
-                                        // Speak segue if present
-                                        if (structuredReply.segue) {
-                                            speak(structuredReply.segue).catch(() => {});
-                                        }
+                                        // Speak segue if present (disabled)
+                                        // if (structuredReply.segue) {
+                                        //     speak(structuredReply.segue).catch(() => {});
+                                        // }
                                         break;
 
                                     case "item": {

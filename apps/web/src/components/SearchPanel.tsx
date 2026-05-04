@@ -88,11 +88,16 @@ export default function SearchPanel({ onSelectSong }: Props) {
               })}
             >
               <div className="search-result-cover">
-                {song.coverUrl ? (
-                  <img src={song.coverUrl} alt={song.title} />
-                ) : (
-                  <div className="search-result-cover-fallback">♫</div>
-                )}
+                <img
+                  src={song.coverUrl || `/api/song/cover?id=${encodeURIComponent(song.id)}`}
+                  alt={song.title}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.src.includes("/api/song/cover")) {
+                      img.src = `/api/song/cover?id=${encodeURIComponent(song.id)}`;
+                    }
+                  }}
+                />
               </div>
               <div className="search-result-info">
                 <div className="search-result-title">{song.title}</div>

@@ -39,6 +39,7 @@ import { MockUpnpService } from "./services/upnp.service.js";
 import { MockSchedulerService, CronSchedulerService } from "./services/scheduler.service.js";
 import { ContextService } from "./services/context.service.js";
 import { PlaylistService } from "./services/playlist.service.js";
+import { ProfileService } from "./services/profile.service.js";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 
@@ -83,7 +84,9 @@ const calendar = feishuAppId && feishuAppSecret
   : new MockCalendarService();
 
 const upnp = new MockUpnpService();
-const context = new ContextService(weather, calendar);
+const profile = new ProfileService();
+await profile.load();
+const context = new ContextService(weather, calendar, profile);
 const playlist = new PlaylistService();
 
 // 调度器需要 claude 和 context，所以在它们之后创建
@@ -91,7 +94,7 @@ const scheduler = claudeApiKey
   ? new CronSchedulerService({ claude, context })
   : new MockSchedulerService();
 
-app.decorate("services", { ncm, claude, tts, weather, calendar, upnp, scheduler, context, playlist });
+app.decorate("services", { ncm, claude, tts, weather, calendar, upnp, scheduler, context, playlist, profile });
 
 app.get("/api/health", async () => ({
   status: "ok",

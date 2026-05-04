@@ -128,7 +128,27 @@ const server = http.createServer(async (req, res) => {
       const kw = url.searchParams.get("keywords") ?? "";
       const limit = Number(url.searchParams.get("limit") ?? "10");
       const data = await ncmPost("/weapi/search/get", { s: kw, type: 1, limit, offset: 0 });
-      const songs = (data?.result?.songs ?? []).map(mapSong);
+      let songs = (data?.result?.songs ?? []).map(mapSong);
+      // Search API doesn't return cover URLs — batch-fetch from song/detail
+      const idsToEnrich = songs.filter(s => !s.coverUrl).map(s => s.id);
+      if (idsToEnrich.length > 0) {
+        try {
+          const detailData = await ncmPost("/weapi/v3/song/detail", {
+            c: JSON.stringify(idsToEnrich.map(id => ({ id }))),
+          });
+          const coverMap = new Map();
+          for (const s of (detailData?.songs ?? [])) {
+            const picUrl = s.album?.picUrl ?? s.al?.picUrl ?? "";
+            if (picUrl) coverMap.set(String(s.id), picUrl);
+          }
+          songs = songs.map(s => ({
+            ...s,
+            coverUrl: s.coverUrl || (coverMap.has(s.id) ? coverMap.get(s.id) : ""),
+          }));
+        } catch (e) {
+          console.error("[ncm] search cover enrichment failed:", e.message);
+        }
+      }
       res.end(JSON.stringify({ result: { songs } }));
     } else if (url.pathname === "/song/url") {
       const id = url.searchParams.get("id") ?? "";

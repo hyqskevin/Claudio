@@ -7,6 +7,7 @@ import type { UpnpService } from "./services/upnp.service.js";
 import type { SchedulerService } from "./services/scheduler.service.js";
 import type { ContextService } from "./services/context.service.js";
 import type { PlaylistService } from "./services/playlist.service.js";
+import type { ProfileService } from "./services/profile.service.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -20,6 +21,7 @@ declare module "fastify" {
       scheduler: SchedulerService;
       context: ContextService;
       playlist: PlaylistService;
+      profile: ProfileService;
     };
   }
 }

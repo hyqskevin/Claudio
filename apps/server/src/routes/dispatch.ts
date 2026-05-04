@@ -31,6 +31,8 @@ function detectCommand(text: string): DispatchCommand | null {
 }
 
 function detectSearch(text: string): string | null {
+  // "推荐" messages should go to AI chat, not search
+  if (/推荐/.test(text)) return null;
   const match = text.match(/^(?:搜索|播放|找|来一首?|听)\s*(.+)/);
   if (match?.[1]) {
     return match[1].trim();
@@ -51,7 +53,7 @@ export async function dispatchRoutes(app: FastifyInstance) {
       const { ncm } = app.services;
       const detail = await ncm.getSongDetail(id);
       if (detail?.coverUrl) {
-        return { coverUrl: detail.coverUrl };
+        return reply.redirect(detail.coverUrl);
       }
       return reply.code(404).send({ error: "not found" });
     } catch {
@@ -140,6 +142,20 @@ export async function dispatchRoutes(app: FastifyInstance) {
       // Send structured reply as final event
       sendEvent("reply", chatReply);
       sendEvent("done", { totalItems: chatReply.play?.length ?? 0 });
+
+      // Record songs to user profile (fire-and-forget)
+      const { profile } = app.services;
+      if (profile && chatReply.play && chatReply.play.length > 0) {
+        for (const song of chatReply.play) {
+          profile.recordListen(song.id, song.name, song.artist, "played").catch(() => {});
+        }
+        // Mark daily recommendation if not yet today
+        profile.hasRecommendedToday().then((has) => {
+          if (!has) {
+            profile.markRecommendedToday(chatReply.play!.map((s) => s.id)).catch(() => {});
+          }
+        }).catch(() => {});
+      }
     } catch (err) {
       console.error("[dispatch] Error:", err);
       sendEvent("error", { message: "抱歉，出了点问题，请再试一次" });
