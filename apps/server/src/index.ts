@@ -22,6 +22,10 @@ import { searchRoutes } from "./routes/search.js";
 import { queueRoutes } from "./routes/queue.js";
 import { chatRoutes } from "./routes/chat.js";
 import { scheduleRoutes } from "./routes/schedule.js";
+import { dispatchRoutes } from "./routes/dispatch.js";
+import { historyRoutes } from "./routes/history.js";
+import { preferencesRoutes } from "./routes/preferences.js";
+import { playbackStateRoutes } from "./routes/playback-state.js";
 import { MockNcmService, NeteaseNcmService } from "./services/ncm.service.js";
 import { MockClaudeService, ClaudeApiService } from "./services/claude.service.js";
 import { readFileSync } from "node:fs";
@@ -97,6 +101,7 @@ app.get("/api/health", async () => ({
     tts: fishApiKey ? "connected" : "mock",
     weather: weatherApiKey ? "connected" : "wttr.in",
     calendar: feishuAppId ? "connected" : "mock",
+    scheduler: claudeApiKey ? "cron" : "mock",
   },
 }));
 
@@ -117,6 +122,10 @@ await app.register(searchRoutes);
 await app.register(queueRoutes);
 await app.register(chatRoutes);
 await app.register(scheduleRoutes);
+await app.register(dispatchRoutes);
+await app.register(historyRoutes);
+await app.register(preferencesRoutes);
+await app.register(playbackStateRoutes);
 
 // Serve frontend static files (SPA fallback)
 const webDist = join(__dirname, "../../web/dist");

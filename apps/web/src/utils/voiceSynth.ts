@@ -1,10 +1,17 @@
+import { audioPlayer } from "../audio/AudioPlayer";
+
 let speaking = false;
 
 export function speak(text: string): void {
   const synth = window.speechSynthesis;
   if (!synth || speaking) return;
   speaking = true;
-  window.dispatchEvent(new CustomEvent("voiceStart"));
+
+  // Duck music volume
+  audioPlayer.duck(0.2, 300);
+
+  // Dispatch event with text for overlay
+  window.dispatchEvent(new CustomEvent("voiceStart", { detail: { text } }));
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "zh-CN";
@@ -12,10 +19,12 @@ export function speak(text: string): void {
   utterance.pitch = 1;
   utterance.onend = () => {
     speaking = false;
+    audioPlayer.unduck(600);
     window.dispatchEvent(new CustomEvent("voiceEnd"));
   };
   utterance.onerror = () => {
     speaking = false;
+    audioPlayer.unduck(600);
     window.dispatchEvent(new CustomEvent("voiceEnd"));
   };
   synth.speak(utterance);
@@ -24,6 +33,7 @@ export function speak(text: string): void {
 export function stop(): void {
   window.speechSynthesis?.cancel();
   speaking = false;
+  audioPlayer.unduck(600);
   window.dispatchEvent(new CustomEvent("voiceEnd"));
 }
 

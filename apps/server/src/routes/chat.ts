@@ -6,13 +6,31 @@ export async function chatRoutes(app: FastifyInstance) {
     const { limit } = request.query as { limit?: string };
     const rows = getRecentMessages(limit ? parseInt(limit, 10) : 50);
     // Return in chronological order (oldest first)
-    const messages = rows.reverse().map((r) => ({
-      id: r.id,
-      role: r.role,
-      text: r.content,
-      ts: new Date(r.created_at).getTime(),
-      songs: r.meta ? JSON.parse(r.meta) : undefined,
-    }));
+    const messages = rows.reverse().map((r) => {
+      let songs: unknown[] | undefined;
+      let structured: unknown | undefined;
+      if (r.meta) {
+        try {
+          const parsed = JSON.parse(r.meta);
+          // Handle new format: { songs, structured }
+          if (parsed && typeof parsed === "object" && "songs" in parsed) {
+            songs = parsed.songs;
+            structured = parsed.structured;
+          } else if (Array.isArray(parsed)) {
+            // Legacy format: meta was the songs array directly
+            songs = parsed;
+          }
+        } catch {}
+      }
+      return {
+        id: r.id,
+        role: r.role,
+        text: r.content,
+        ts: new Date(r.created_at).getTime(),
+        songs,
+        structured,
+      };
+    });
     return { messages };
   });
 

@@ -8,6 +8,9 @@ interface MediaCallbacks {
 
 class AudioPlayerManager {
   private audio: HTMLAudioElement;
+  private audioCtx: AudioContext | null = null;
+  private sourceNode: MediaElementAudioSourceNode | null = null;
+  private gainNode: GainNode | null = null;
   private onPlayListeners: Listener[] = [];
   private onPauseListeners: Listener[] = [];
   private onEndedListeners: Listener[] = [];
@@ -118,6 +121,39 @@ class AudioPlayerManager {
 
   setVolume(v: number) {
     this.audio.volume = Math.max(0, Math.min(1, v));
+  }
+
+  /** Initialize Web Audio API gain node for ducking */
+  private ensureGainNode() {
+    if (this.gainNode) return;
+    try {
+      this.audioCtx = new AudioContext();
+      this.sourceNode = this.audioCtx.createMediaElementSource(this.audio);
+      this.gainNode = this.audioCtx.createGain();
+      this.sourceNode.connect(this.gainNode);
+      this.gainNode.connect(this.audioCtx.destination);
+    } catch {
+      // Already connected or unsupported
+    }
+  }
+
+  /** Duck music volume (for DJ voice) */
+  duck(targetVolume = 0.2, durationMs = 300) {
+    this.ensureGainNode();
+    if (!this.gainNode || !this.audioCtx) return;
+    const now = this.audioCtx.currentTime;
+    this.gainNode.gain.cancelScheduledValues(now);
+    this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+    this.gainNode.gain.linearRampToValueAtTime(targetVolume, now + durationMs / 1000);
+  }
+
+  /** Restore music volume after ducking */
+  unduck(durationMs = 600) {
+    if (!this.gainNode || !this.audioCtx) return;
+    const now = this.audioCtx.currentTime;
+    this.gainNode.gain.cancelScheduledValues(now);
+    this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+    this.gainNode.gain.linearRampToValueAtTime(1.0, now + durationMs / 1000);
   }
 
   get isPlaying() {

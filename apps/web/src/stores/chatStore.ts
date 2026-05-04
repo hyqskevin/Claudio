@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import type { QueueItem } from "../api/client";
+import type { QueueItem, StructuredReply } from "../api/client";
 import { api } from "../api/client";
 import { useToastStore } from "./toastStore";
+import { speak } from "../utils/voiceSynth";
 
 export interface ChatMessage {
     id: string;
@@ -10,6 +11,8 @@ export interface ChatMessage {
     ts: number;
     /** Recommended songs shown inline with AI message */
     songs?: RecommendedSong[];
+    /** Structured reply from Claude */
+    structured?: StructuredReply;
 }
 
 export interface RecommendedSong {
@@ -26,6 +29,7 @@ interface ChatState {
     messages: ChatMessage[];
     streamingText: string;
     streamingSongs: RecommendedSong[];
+    streamingReply: StructuredReply | null;
     isStreaming: boolean;
     error: string | null;
 
@@ -41,6 +45,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
     streamingText: "",
     streamingSongs: [],
+    streamingReply: null,
     isStreaming: false,
     error: null,
 
@@ -55,6 +60,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                         text: m.text,
                         ts: m.ts,
                         songs: m.songs as RecommendedSong[] | undefined,
+                        structured: m.structured as StructuredReply | undefined,
                     })),
                 });
             }
@@ -79,6 +85,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             messages: [...s.messages, userMsg],
             streamingText: "",
             streamingSongs: [],
+            streamingReply: null,
             isStreaming: true,
             error: null,
         }));
@@ -86,72 +93,181 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Persist user message
         api.saveChatMessage({ id: userMsg.id, role: "user", text }).catch(() => {});
 
-        const collectedSongs: RecommendedSong[] = [];
-        let collectedText = "";
+        // Try dispatch: first attempt non-streaming (command/search)
+        (async () => {
+            try {
+                const res = await fetch("/api/dispatch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: text }),
+                });
 
-        const controller = api.streamChat(text, {
-            onStatus: (phase) => {
-                if (phase === "thinking") {
-                    set({ streamingText: "🎵 正在为你挑选音乐..." });
+                if (!res.ok) {
+                    set({ isStreaming: false, error: `Server error: ${res.status}` });
+                    return;
                 }
-            },
 
-            onChunk: (chunk) => {
-                collectedText += chunk;
+                const contentType = res.headers.get("content-type") ?? "";
 
-                // If we haven't found the JSON block yet, display as streaming text
-                // Once JSON starts (```), we stop updating streaming text
-                const jsonStart = collectedText.indexOf("```");
-                if (jsonStart >= 0) {
-                    // Show only the conversational part before the JSON
-                    const conversationalPart = collectedText.slice(0, jsonStart).trim();
-                    set({ streamingText: conversationalPart });
-                } else {
-                    set({ streamingText: collectedText });
+                // JSON response = command or search
+                if (contentType.includes("application/json")) {
+                    const data = await res.json();
+                    set({ isStreaming: false });
+
+                    if (data.type === "command") {
+                        useToastStore.getState().addToast(data.message || "已执行", "success");
+                    } else if (data.type === "search" && data.results) {
+                        // Show search results as AI message with songs
+                        const songs: RecommendedSong[] = data.results.map((r: { id: string; title: string; artist: string; coverUrl?: string }) => ({
+                            id: r.id,
+                            songId: r.id,
+                            title: r.title,
+                            artist: r.artist,
+                            coverUrl: r.coverUrl,
+                        }));
+                        const aiMsg: ChatMessage = {
+                            id: `ai_${Date.now()}`,
+                            role: "ai",
+                            text: `为你找到 ${songs.length} 首「${data.query}」相关的歌曲：`,
+                            ts: Date.now(),
+                            songs,
+                        };
+                        set((s) => ({
+                            messages: [...s.messages, aiMsg],
+                        }));
+                        api.saveChatMessage({
+                            id: aiMsg.id,
+                            role: "ai",
+                            text: aiMsg.text,
+                            meta: aiMsg.songs,
+                        }).catch(() => {});
+                    }
+                    return;
                 }
-            },
 
-            onItem: (item: QueueItem) => {
-                if (item.type === "song") {
-                    const song: RecommendedSong = {
-                        id: item.id,
-                        songId: item.songId,
-                        title: item.title ?? "Unknown",
-                        artist: item.artist ?? "",
-                        coverUrl: item.coverUrl,
-                        reason: item.reason,
-                        audioUrl: item.audioUrl,
-                    };
-                    collectedSongs.push(song);
-                    set({ streamingSongs: [...collectedSongs] });
+                // SSE stream = chat response
+                const reader = res.body?.getReader();
+                if (!reader) {
+                    set({ isStreaming: false });
+                    return;
                 }
-            },
 
-            onPlan: () => {
-                // Plan metadata received — no action needed, items will follow
-            },
+                const decoder = new TextDecoder();
+                let buffer = "";
+                let collectedText = "";
+                const collectedSongs: RecommendedSong[] = [];
+                let structuredReply: StructuredReply | null = null;
 
-            onDone: () => {
-                // Finalize: create the AI message
-                const jsonStart = collectedText.indexOf("```");
-                const conversationalText = jsonStart >= 0
-                    ? collectedText.slice(0, jsonStart).trim()
-                    : collectedText;
+                // Create abort controller for this stream
+                const controller = new AbortController();
+                currentAbort = controller;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() ?? "";
+
+                    let currentEvent = "";
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+
+                        if (trimmed.startsWith("event:")) {
+                            currentEvent = trimmed.slice(6).trim();
+                            continue;
+                        }
+
+                        if (trimmed.startsWith("data:")) {
+                            const jsonStr = trimmed.slice(5).trim();
+                            try {
+                                const data = JSON.parse(jsonStr);
+
+                                switch (currentEvent) {
+                                    case "status":
+                                        if (data.phase === "thinking") {
+                                            set({ streamingText: "🎵 正在为你挑选音乐..." });
+                                        }
+                                        break;
+
+                                    case "chunk":
+                                        collectedText += data.text;
+                                        set({ streamingText: collectedText });
+                                        break;
+
+                                    case "reply":
+                                        structuredReply = data as StructuredReply;
+                                        set({ streamingReply: structuredReply });
+                                        // Speak segue if present
+                                        if (structuredReply.segue) {
+                                            speak(structuredReply.segue);
+                                        }
+                                        break;
+
+                                    case "item": {
+                                        const item = data as QueueItem;
+                                        if (item.type === "song") {
+                                            const song: RecommendedSong = {
+                                                id: item.id,
+                                                songId: item.songId,
+                                                title: item.title ?? "Unknown",
+                                                artist: item.artist ?? "",
+                                                coverUrl: item.coverUrl,
+                                                reason: item.reason,
+                                                audioUrl: item.audioUrl,
+                                            };
+                                            collectedSongs.push(song);
+                                            set({ streamingSongs: [...collectedSongs] });
+                                        }
+                                        break;
+                                    }
+
+                                    case "done":
+                                        // Finalize message
+                                        break;
+
+                                    case "error":
+                                        set({ error: data.message });
+                                        useToastStore.getState().addToast("AI 对话出错", "error");
+                                        break;
+                                }
+                            } catch {
+                                // Skip unparseable
+                            }
+                        }
+                    }
+                }
+
+                // Build the final AI message
+                const displayText = structuredReply?.say || collectedText || "已为你生成播放列表";
+
+                // Convert structured play to RecommendedSong if we have them
+                const finalSongs = structuredReply?.play
+                    ? structuredReply.play.map((s) => ({
+                        id: s.id,
+                        songId: s.id,
+                        title: s.name,
+                        artist: s.artist,
+                        coverUrl: s.cover,
+                    }))
+                    : collectedSongs;
 
                 const aiMsg: ChatMessage = {
                     id: `ai_${Date.now()}`,
                     role: "ai",
-                    text: conversationalText || "已为你生成播放列表 🎶",
+                    text: displayText,
                     ts: Date.now(),
-                    songs: collectedSongs.length > 0 ? collectedSongs : undefined,
+                    songs: finalSongs.length > 0 ? finalSongs : undefined,
+                    structured: structuredReply ?? undefined,
                 };
-
-                // TODO: speak AI segue when voice mode is enabled
 
                 set((s) => ({
                     messages: [...s.messages, aiMsg],
                     streamingText: "",
                     streamingSongs: [],
+                    streamingReply: null,
                     isStreaming: false,
                 }));
 
@@ -160,41 +276,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     id: aiMsg.id,
                     role: "ai",
                     text: aiMsg.text,
-                    meta: aiMsg.songs,
+                    meta: { songs: aiMsg.songs, structured: aiMsg.structured },
                 }).catch(() => {});
-            },
-
-            onError: (msg) => {
-                set({
-                    streamingText: "",
-                    streamingSongs: [],
-                    isStreaming: false,
-                    error: msg,
-                });
-                useToastStore.getState().addToast("AI 对话出错", "error");
-            },
-        });
-
-        currentAbort = controller;
+            } catch (err) {
+                if ((err as Error).name !== "AbortError") {
+                    set({
+                        streamingText: "",
+                        streamingSongs: [],
+                        streamingReply: null,
+                        isStreaming: false,
+                        error: (err as Error).message,
+                    });
+                    useToastStore.getState().addToast("发送失败", "error");
+                }
+            }
+        })();
     },
 
     abort: () => {
         currentAbort?.abort();
         currentAbort = null;
 
-        const { streamingText, streamingSongs } = get();
-        if (streamingText || streamingSongs.length > 0) {
+        const { streamingText, streamingSongs, streamingReply } = get();
+        if (streamingText || streamingSongs.length > 0 || streamingReply) {
             const aiMsg: ChatMessage = {
                 id: `ai_${Date.now()}`,
                 role: "ai",
-                text: streamingText || "已中断",
+                text: streamingReply?.say || streamingText || "已中断",
                 ts: Date.now(),
                 songs: streamingSongs.length > 0 ? streamingSongs : undefined,
+                structured: streamingReply ?? undefined,
             };
             set((s) => ({
                 messages: [...s.messages, aiMsg],
                 streamingText: "",
                 streamingSongs: [],
+                streamingReply: null,
                 isStreaming: false,
             }));
         }
@@ -207,6 +324,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             messages: [],
             streamingText: "",
             streamingSongs: [],
+            streamingReply: null,
             isStreaming: false,
             error: null,
         });

@@ -4,6 +4,16 @@ interface Props {
   targetSelector?: string;
 }
 
+function parseColor(c: string): [number, number, number] {
+  if (c.startsWith("rgb(")) {
+    const m = c.match(/(\d+)/g);
+    return m ? [+m[0], +m[1], +m[2]] : [94, 232, 197];
+  }
+  const m = c.match(/^#([0-9a-f]{6})$/i);
+  if (m) return [parseInt(m[1], 16) >> 16, (parseInt(m[1], 16) >> 8) & 0xff, parseInt(m[1], 16) & 0xff];
+  return [94, 232, 197];
+}
+
 export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<number>(0);
@@ -43,19 +53,21 @@ export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
       const t = performance.now() * 0.001;
       const amp = 10;
 
+      const style = getComputedStyle(document.documentElement);
+      const pc = style.getPropertyValue("--color-primary").trim() || "#5ee8c5";
+      const [cr, cg, cb] = parseColor(pc);
+
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
       ctx.beginPath();
 
-      // Top edge (right to left)
       for (let x = r.right - R; x >= r.left + R; x -= 3) {
         const wv = wave(0, t, x) * amp;
         ctx.lineTo(x, r.top + wv);
       }
 
-      // Top-left corner
       for (let a = Math.PI * 1.5; a >= Math.PI; a -= 0.06) {
         const cx = r.left + R;
         const cy = r.top + R;
@@ -63,13 +75,11 @@ export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
         ctx.lineTo(cx + Math.cos(a) * (R + wv), cy + Math.sin(a) * (R + wv));
       }
 
-      // Left edge (top to bottom)
       for (let y = r.top + R; y <= r.bottom - R; y += 3) {
         const wv = wave(2, t, y) * amp;
         ctx.lineTo(r.left + wv, y);
       }
 
-      // Bottom-left corner
       for (let a = Math.PI; a >= Math.PI * 0.5; a -= 0.06) {
         const cx = r.left + R;
         const cy = r.bottom - R;
@@ -77,13 +87,11 @@ export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
         ctx.lineTo(cx + Math.cos(a) * (R + wv), cy + Math.sin(a) * (R + wv));
       }
 
-      // Bottom edge (left to right)
       for (let x = r.left + R; x <= r.right - R; x += 3) {
         const wv = wave(4, t, x) * amp;
         ctx.lineTo(x, r.bottom + wv);
       }
 
-      // Bottom-right corner
       for (let a = Math.PI * 0.5; a >= 0; a -= 0.06) {
         const cx = r.right - R;
         const cy = r.bottom - R;
@@ -91,13 +99,11 @@ export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
         ctx.lineTo(cx + Math.cos(a) * (R + wv), cy + Math.sin(a) * (R + wv));
       }
 
-      // Right edge (bottom to top)
       for (let y = r.bottom - R; y >= r.top + R; y -= 3) {
         const wv = wave(6, t, y) * amp;
         ctx.lineTo(r.right + wv, y);
       }
 
-      // Top-right corner
       for (let a = 0; a <= Math.PI * 0.5; a += 0.06) {
         const cx = r.right - R;
         const cy = r.top + R;
@@ -116,7 +122,7 @@ export default function BorderGlow({ targetSelector = ".main-inner" }: Props) {
       for (const l of layers) {
         ctx.lineWidth = l.w;
         ctx.filter = `blur(${l.blur}px)`;
-        ctx.strokeStyle = `rgba(170, 130, 255, ${l.alpha})`;
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${l.alpha})`;
         ctx.stroke();
       }
       ctx.filter = "none";

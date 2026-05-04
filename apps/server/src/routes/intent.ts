@@ -99,12 +99,13 @@ export async function intentRoutes(app: FastifyInstance) {
                 }
             }
 
-            // Send plan metadata
+            // Send plan metadata (including segue for DJ voice)
             sendEvent("plan", {
                 scene: plan.scene,
                 summary: plan.summary,
                 itemCount: plan.items.length,
                 songCount: plan.items.filter((i) => i.type === "song").length,
+                segue: plan.segue,
             });
 
             // Now enrich and send songs one by one

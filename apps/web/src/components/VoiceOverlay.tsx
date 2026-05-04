@@ -3,12 +3,20 @@ import { stop } from "../utils/voiceSynth";
 
 export default function VoiceOverlay() {
   const [visible, setVisible] = useState(false);
+  const [djText, setDjText] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
 
   useEffect(() => {
-    const onStart = () => setVisible(true);
-    const onEnd = () => setVisible(false);
+    const onStart = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setDjText(detail?.text ?? "");
+      setVisible(true);
+    };
+    const onEnd = () => {
+      setVisible(false);
+      setDjText("");
+    };
     window.addEventListener("voiceStart", onStart);
     window.addEventListener("voiceEnd", onEnd);
     return () => {
@@ -84,7 +92,26 @@ export default function VoiceOverlay() {
         ref={canvasRef}
         style={{ width: "80%", height: 120, marginBottom: 24 }}
       />
-      <div style={{ color: "var(--text-primary, #e8e8f0)", fontSize: 18, fontWeight: 500 }}>
+      {djText && (
+        <div
+          style={{
+            color: "var(--text-primary, #e8e8f0)",
+            fontSize: 16,
+            fontWeight: 500,
+            maxWidth: "80%",
+            textAlign: "center",
+            lineHeight: 1.6,
+            marginBottom: 16,
+            padding: "12px 20px",
+            borderRadius: 16,
+            background: "rgba(255, 255, 255, 0.06)",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+          }}
+        >
+          {djText}
+        </div>
+      )}
+      <div style={{ color: "var(--text-secondary, #8888a0)", fontSize: 14, fontWeight: 500 }}>
         DJ is speaking...
       </div>
       <button

@@ -102,13 +102,29 @@ export interface FavoriteItem {
     createdAt: string;
 }
 
+export interface StructuredReply {
+    say: string;
+    reason?: string;
+    play?: Array<{ id: string; name: string; artist: string; album?: string; cover?: string }>;
+    segue?: string;
+}
+
 export interface StreamChatCallbacks {
     onChunk?: (text: string) => void;
-    onPlan?: (plan: { scene: string; summary: string; itemCount: number; songCount: number }) => void;
+    onPlan?: (plan: { scene: string; summary: string; itemCount: number; songCount: number; segue?: string }) => void;
     onItem?: (item: QueueItem) => void;
     onDone?: (data: { planId: string; totalItems: number }) => void;
+    onReply?: (reply: StructuredReply) => void;
     onError?: (message: string) => void;
     onStatus?: (phase: string) => void;
+}
+
+export interface DispatchResult {
+    type: "command" | "search";
+    action?: string;
+    message?: string;
+    query?: string;
+    results?: Array<{ id: string; title: string; artist: string; album: string; coverUrl: string; durationMs: number }>;
 }
 
 export const api = {
@@ -219,6 +235,131 @@ export const api = {
         return controller;
     },
 
+    /**
+     * Dispatch: POST /api/dispatch
+     * Returns immediately for commands/search, streams SSE for chat.
+     */
+    postDispatch: async (message: string): Promise<DispatchResult | null> => {
+        const res = await fetch(`${BASE}/api/dispatch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message }),
+        });
+
+        // If content-type is JSON, it's a command or search result
+        const contentType = res.headers.get("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+            return res.json() as Promise<DispatchResult>;
+        }
+
+        // Otherwise it's SSE stream — caller should use streamDispatch instead
+        return null;
+    },
+
+    /**
+     * Streaming dispatch: sends message via /api/dispatch, receives SSE events.
+     * Handles both JSON responses (command/search) and SSE streams (chat).
+     * Returns an AbortController.
+     */
+    streamDispatch: (message: string, callbacks: StreamChatCallbacks): AbortController => {
+        const controller = new AbortController();
+
+        (async () => {
+            try {
+                const res = await fetch(`${BASE}/api/dispatch`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message }),
+                    signal: controller.signal,
+                });
+
+                if (!res.ok) {
+                    callbacks.onError?.(`Server error: ${res.status}`);
+                    return;
+                }
+
+                const contentType = res.headers.get("content-type") ?? "";
+
+                // JSON response (command or search)
+                if (contentType.includes("application/json")) {
+                    const data = await res.json();
+                    // Command or search — send as done with the data
+                    callbacks.onDone?.({ planId: "dispatch", totalItems: 0, ...data });
+                    return;
+                }
+
+                // SSE stream
+                const reader = res.body?.getReader();
+                if (!reader) {
+                    callbacks.onError?.("No response body");
+                    return;
+                }
+
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() ?? "";
+
+                    let currentEvent = "";
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+
+                        if (trimmed.startsWith("event:")) {
+                            currentEvent = trimmed.slice(6).trim();
+                            continue;
+                        }
+
+                        if (trimmed.startsWith("data:")) {
+                            const jsonStr = trimmed.slice(5).trim();
+                            try {
+                                const data = JSON.parse(jsonStr);
+
+                                switch (currentEvent) {
+                                    case "chunk":
+                                        callbacks.onChunk?.(data.text);
+                                        break;
+                                    case "reply":
+                                        callbacks.onReply?.(data as StructuredReply);
+                                        break;
+                                    case "plan":
+                                        callbacks.onPlan?.(data);
+                                        break;
+                                    case "item":
+                                        callbacks.onItem?.(data as QueueItem);
+                                        break;
+                                    case "done":
+                                        callbacks.onDone?.(data);
+                                        break;
+                                    case "error":
+                                        callbacks.onError?.(data.message);
+                                        break;
+                                    case "status":
+                                        callbacks.onStatus?.(data.phase);
+                                        break;
+                                }
+                            } catch {
+                                // Skip unparseable
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                if ((err as Error).name !== "AbortError") {
+                    callbacks.onError?.((err as Error).message);
+                }
+            }
+        })();
+
+        return controller;
+    },
+
     playerPlay: () => fetch("/api/player/play", { method: "POST" }),
     playerPause: () => fetch("/api/player/pause", { method: "POST" }),
     playerNext: () => fetch("/api/player/next", { method: "POST" }),
@@ -274,7 +415,7 @@ export const api = {
             body: JSON.stringify({ items }),
         }),
     getChatMessages: (limit?: number) =>
-        request<{ messages: Array<{ id: string; role: string; text: string; ts: number; songs?: unknown[] }> }>(
+        request<{ messages: Array<{ id: string; role: string; text: string; ts: number; songs?: unknown[]; structured?: unknown }> }>(
             `/api/chat/messages${limit ? `?limit=${limit}` : ""}`
         ),
     saveChatMessage: (body: { id: string; role: string; text: string; meta?: unknown }) =>

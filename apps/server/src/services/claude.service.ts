@@ -1,6 +1,25 @@
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export interface ChatSong {
+    id: string;
+    name: string;
+    artist: string;
+    album?: string;
+    cover?: string;
+}
+
+export interface ChatReply {
+    say: string;
+    reason?: string;
+    play?: ChatSong[];
+    segue?: string;
+}
 
 export interface PlanRequest {
     trigger: "manual" | "auto" | "scheduled";
@@ -24,6 +43,7 @@ export interface PlanResponse {
     summary: string;
     scene: string;
     items: PlanItem[];
+    segue?: string;
     memory?: Array<{ file: string; add: string }>;
 }
 
@@ -34,6 +54,11 @@ export interface ClaudeService {
         context: string,
         onChunk: (text: string) => void
     ): Promise<PlanResponse>;
+    generateChatReplyStream(
+        message: string,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<ChatReply>;
 }
 
 export class MockClaudeService implements ClaudeService {
@@ -78,11 +103,30 @@ export class MockClaudeService implements ClaudeService {
         onChunk("好的，我来为你安排一个轻松的播放列表～\n\n这几首歌都很适合现在的氛围，希望你喜欢！");
         return result;
     }
+
+    async generateChatReplyStream(
+        _message: string,
+        _context: string,
+        onChunk: (text: string) => void
+    ): Promise<ChatReply> {
+        const say = "好的，我来为你推荐几首歌～";
+        onChunk(say);
+        return {
+            say,
+            reason: "根据你的口味推荐",
+            play: [
+                { id: "mock_1", name: "晴天", artist: "周杰伦", album: "叶惠美" },
+                { id: "mock_2", name: "稻香", artist: "周杰伦", album: "魔杰座" },
+            ],
+            segue: "接下来这首晴天，是很多人的青春回忆～",
+        };
+    }
 }
 
 interface ClaudeRawResponse {
     summary: string;
     scene: string;
+    segue?: string;
     djLines?: Array<{ position: string; text: string }>;
     songs?: Array<{ query?: string; songId?: string; reason: string }>;
     memory?: Array<{ file: string; add: string }>;
@@ -94,11 +138,40 @@ export class ClaudeApiService implements ClaudeService {
     private model: string;
     private systemPrompt: string;
 
+    private chatSystemPrompt: string;
+
     constructor(config: { apiKey: string; baseUrl: string; model: string }, systemPrompt: string) {
         this.apiKey = config.apiKey;
         this.baseUrl = config.baseUrl;
         this.model = config.model;
         this.systemPrompt = systemPrompt;
+        this.chatSystemPrompt = this.buildChatSystemPrompt();
+    }
+
+    private buildChatSystemPrompt(): string {
+        // Base prompt — agent.md is loaded lazily in generateChatReplyStream
+        return `你是 Claudio，一个沉浸式 AI 电台的 DJ。
+
+## 回复格式
+你必须以 JSON 格式回复，不要添加任何其他文字：
+
+{
+  "say": "回复给用户的消息文本（DJ 口吻，轻松有趣）",
+  "reason": "推荐理由（如果有推荐歌曲的话）",
+  "play": [
+    {"id": "歌曲ID", "name": "歌曲名", "artist": "艺术家", "album": "专辑名", "cover": "封面URL"}
+  ],
+  "segue": "要用 TTS 朗读的语音内容（歌曲故事、冷知识等）"
+}
+
+## 规则
+- say: 必填，回复给用户的文字，简洁有力
+- reason: 可选，推荐理由
+- play: 可选，推荐的歌曲列表（3-8首）
+- segue: 可选，DJ 语音播报内容（1-3句话）
+- 使用 DJ 口吻，轻松有趣，偶尔中英混搭
+- 歌曲信息尽量准确，歌手+歌名要具体
+- 如果用户只是闲聊，play 可以为空数组`;
     }
 
     async generatePlan(request: PlanRequest, context: string): Promise<PlanResponse> {
@@ -359,6 +432,7 @@ export class ClaudeApiService implements ClaudeService {
             summary: raw.summary ?? "已生成播放计划",
             scene: raw.scene ?? request.scene ?? "default",
             items,
+            segue: raw.segue,
             memory: raw.memory,
         };
     }
@@ -371,5 +445,136 @@ export class ClaudeApiService implements ClaudeService {
         items.push({ type: "song", query: "轻音乐", reason: "默认推荐" });
         items.push({ type: "song", query: "钢琴曲", reason: "默认推荐" });
         return items;
+    }
+
+    async generateChatReplyStream(
+        message: string,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<ChatReply> {
+        // Build chat system prompt with agent.md if available
+        let systemPrompt = this.chatSystemPrompt;
+        try {
+            const configDir = join(__dirname, "../../../config");
+            const agentPath = join(configDir, "agent.md");
+            if (existsSync(agentPath)) {
+                const agentMd = await readFile(agentPath, "utf-8");
+                systemPrompt = `${agentMd}\n\n${systemPrompt}`;
+            }
+        } catch {}
+
+        const userMessage = context ? `${context}\n\n用户说：${message}` : message;
+
+        // Stream the response
+        const fullText = await this.callChatStream(userMessage, systemPrompt, onChunk);
+
+        // Try to parse structured JSON reply
+        const parsed = this.extractChatReply(fullText);
+        if (parsed) {
+            return parsed;
+        }
+
+        // Fallback: treat entire text as `say`
+        return { say: fullText || "好的，收到~" };
+    }
+
+    private async callChatStream(
+        userMessage: string,
+        systemPrompt: string,
+        onChunk: (text: string) => void
+    ): Promise<string> {
+        const url = `${this.baseUrl}/v1/messages`;
+
+        const bodyObj = {
+            model: this.model,
+            max_tokens: 4096,
+            stream: true,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userMessage }],
+        };
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-api-key": this.apiKey,
+                "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify(bodyObj),
+            signal: AbortSignal.timeout(120000),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Claude API ${response.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || !trimmed.startsWith("data:")) continue;
+
+                const data = trimmed.slice(5).trim();
+                if (data === "[DONE]") continue;
+
+                try {
+                    const event = JSON.parse(data);
+                    if (event.type === "content_block_delta") {
+                        const text = event.delta?.text;
+                        if (text) {
+                            fullText += text;
+                            onChunk(text);
+                        }
+                    }
+                } catch {
+                    // Skip unparseable lines
+                }
+            }
+        }
+
+        return fullText;
+    }
+
+    private extractChatReply(text: string): ChatReply | null {
+        // Try direct JSON parse
+        try {
+            const obj = JSON.parse(text) as ChatReply;
+            if (obj.say) return obj;
+        } catch {}
+
+        // Try code block
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (match?.[1]) {
+            try {
+                const obj = JSON.parse(match[1].trim()) as ChatReply;
+                if (obj.say) return obj;
+            } catch {}
+        }
+
+        // Try to find JSON object in text
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+            try {
+                const obj = JSON.parse(text.slice(start, end + 1)) as ChatReply;
+                if (obj.say) return obj;
+            } catch {}
+        }
+
+        return null;
     }
 }

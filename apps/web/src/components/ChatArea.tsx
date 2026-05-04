@@ -1,17 +1,18 @@
 import { useEffect, useRef } from "react";
 import { useChatStore, type ChatMessage, type RecommendedSong } from "../stores/chatStore";
 import { usePlayerStore } from "../stores/playerStore";
-import type { QueueItem } from "../api/client";
+import type { QueueItem, StructuredReply } from "../api/client";
+import SongCard from "./SongCard";
 
 export default function ChatArea() {
-    const { messages, streamingText, streamingSongs, isStreaming, error } = useChatStore();
+    const { messages, streamingText, streamingSongs, streamingReply, isStreaming, error } = useChatStore();
     const containerRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages, streamingText, streamingSongs]);
+    }, [messages, streamingText, streamingSongs, streamingReply]);
 
     return (
         <div className="chat-area">
@@ -37,23 +38,29 @@ export default function ChatArea() {
                 ))}
 
                 {/* Streaming AI response */}
-                {isStreaming && (streamingText || streamingSongs.length > 0) && (
+                {isStreaming && (streamingText || streamingSongs.length > 0 || streamingReply) && (
                     <div className="chat-bubble ai">
                         <div className="chat-avatar ai">🎵</div>
                         <div className="chat-content">
-                            {streamingText && (
-                                <div className="chat-text streaming">
-                                    {streamingText}
-                                    <span className="stream-cursor">▊</span>
-                                </div>
-                            )}
-                            {streamingSongs.length > 0 && (
-                                <div className="song-cards">
-                                    {streamingSongs.map((song, i) => (
-                                        <SongCard key={song.id} song={song} index={i} isStreaming />
-                                    ))}
-                                    <div className="song-cards-loading">正在搜索更多歌曲...</div>
-                                </div>
+                            {streamingReply ? (
+                                <StructuredContent reply={streamingReply} songs={streamingSongs} isStreaming />
+                            ) : (
+                                <>
+                                    {streamingText && (
+                                        <div className="chat-text streaming">
+                                            {streamingText}
+                                            <span className="stream-cursor">▊</span>
+                                        </div>
+                                    )}
+                                    {streamingSongs.length > 0 && (
+                                        <div className="song-cards">
+                                            {streamingSongs.map((song, i) => (
+                                                <LegacySongCard key={song.id} song={song} index={i} isStreaming />
+                                            ))}
+                                            <div className="song-cards-loading">正在搜索更多歌曲...</div>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
@@ -96,18 +103,113 @@ function ChatBubble({ message }: { message: ChatMessage }) {
                 <>
                     <div className="chat-avatar ai">🎵</div>
                     <div className="chat-content">
-                        <div className="chat-text">{message.text}</div>
-                        {message.songs && message.songs.length > 0 && (
-                            <div className="song-cards">
-                                {message.songs.map((song, i) => (
-                                    <SongCard key={song.id} song={song} index={i} />
-                                ))}
-                            </div>
+                        {message.structured ? (
+                            <StructuredContent
+                                reply={message.structured}
+                                songs={message.songs}
+                            />
+                        ) : (
+                            <>
+                                <div className="chat-text">{message.text}</div>
+                                {message.songs && message.songs.length > 0 && (
+                                    <div className="song-cards">
+                                        {message.songs.map((song, i) => (
+                                            <LegacySongCard key={song.id} song={song} index={i} />
+                                        ))}
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </>
             )}
         </div>
+    );
+}
+
+/** Renders structured reply: say text, reason, segue, and SongCard list */
+function StructuredContent({
+    reply,
+    songs,
+    isStreaming,
+}: {
+    reply: StructuredReply;
+    songs?: RecommendedSong[];
+    isStreaming?: boolean;
+}) {
+    const playItem = usePlayerStore((s) => s.playItem);
+
+    // Convert structured play to RecommendedSong for SongCard
+    const playSongs: RecommendedSong[] = reply.play
+        ? reply.play.map((s) => ({
+            id: s.id,
+            songId: s.id,
+            title: s.name,
+            artist: s.artist,
+            coverUrl: s.cover,
+        }))
+        : [];
+
+    // Use provided songs (from enrichment) if available, otherwise use structured play
+    const displaySongs = songs && songs.length > 0 ? songs : playSongs;
+
+    return (
+        <>
+            {/* Text: say + reason */}
+            {reply.say && (
+                <div className="chat-text">
+                    {reply.say}
+                    {isStreaming && <span className="stream-cursor">▊</span>}
+                </div>
+            )}
+            {reply.reason && (
+                <div className="chat-reason">{reply.reason}</div>
+            )}
+
+            {/* Voice: segue waveform bar */}
+            {reply.segue && (
+                <div
+                    className="chat-segue"
+                    onClick={() => {
+                        // Speak the segue text using Web Speech API
+                        if ("speechSynthesis" in window) {
+                            const utterance = new SpeechSynthesisUtterance(reply.segue);
+                            utterance.lang = "zh-CN";
+                            window.speechSynthesis.speak(utterance);
+                        }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLElement).click()}
+                >
+                    <span className="segue-icon">🎙️</span>
+                    <div className="segue-waveform">
+                        <span /><span /><span /><span /><span />
+                        <span /><span /><span /><span /><span />
+                    </div>
+                    <span className="segue-label">DJ 语音</span>
+                </div>
+            )}
+
+            {/* Songs: SongCard list */}
+            {displaySongs.length > 0 && (
+                <div className="song-cards">
+                    {displaySongs.map((song) => (
+                        <SongCard
+                            key={song.id}
+                            songId={song.songId ?? song.id}
+                            title={song.title}
+                            artist={song.artist}
+                            coverUrl={song.coverUrl}
+                            disabled={!song.audioUrl}
+                        />
+                    ))}
+                    {isStreaming && (
+                        <div className="song-cards-loading">正在搜索更多歌曲...</div>
+                    )}
+                </div>
+            )}
+        </>
     );
 }
 
@@ -126,7 +228,8 @@ function ChatHint({ text }: { text: string }) {
     );
 }
 
-function SongCard({ song, index, isStreaming }: { song: RecommendedSong; index: number; isStreaming?: boolean }) {
+/** Legacy song card for backward compatibility with old messages */
+function LegacySongCard({ song, index, isStreaming }: { song: RecommendedSong; index: number; isStreaming?: boolean }) {
     const playItem = usePlayerStore((s) => s.playItem);
 
     const handleClick = () => {

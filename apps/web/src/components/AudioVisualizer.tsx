@@ -10,6 +10,20 @@ interface Props {
 const ATTACK = 0.4;
 const RELEASE = 0.15;
 
+function toRgba(color: string, alpha: number): string {
+  if (color.startsWith("rgb(")) {
+    return color.replace("rgb(", "rgba(").replace(")", `,${alpha})`);
+  }
+  const m = color.match(/^#([0-9a-f]{6})$/i);
+  if (m) {
+    const r = parseInt(m[1], 16) >> 16;
+    const g = (parseInt(m[1], 16) >> 8) & 0xff;
+    const b = parseInt(m[1], 16) & 0xff;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  return `rgba(94,232,197,${alpha})`;
+}
+
 export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
@@ -104,7 +118,9 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
 
       const cx = w() / 2;
       const cy = h() / 2;
-      const mint = "rgba(94,232,197,";
+
+      const style = getComputedStyle(document.documentElement);
+      const primaryColor = style.getPropertyValue("--color-primary").trim() || "#5ee8c5";
 
       const speedMul = 1 + bass * 0.6;
       const scaleMul = 1 + bass * 0.4;
@@ -121,10 +137,10 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
             i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
           }
           ctx.closePath();
-          ctx.strokeStyle = `${mint}${opBase})`;
+          ctx.strokeStyle = toRgba(primaryColor, opBase);
           ctx.lineWidth = 2;
           ctx.stroke();
-          ctx.fillStyle = `${mint}${opBase * 0.15})`;
+          ctx.fillStyle = toRgba(primaryColor, opBase * 0.15);
           ctx.fill();
           break;
         }
@@ -139,7 +155,7 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
               cy + Math.sin(angle) * 30 * scaleMul,
               r, r * 0.4, angle, 0, Math.PI * 2
             );
-            ctx.strokeStyle = `${mint}${opBase + Math.sin(time + p) * 0.1 + mid * 0.15})`;
+            ctx.strokeStyle = toRgba(primaryColor, opBase + Math.sin(time + p) * 0.1 + mid * 0.15);
             ctx.lineWidth = 1.5;
             ctx.stroke();
           }
@@ -151,7 +167,7 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
             const r = (50 + i * 8) * scaleMul;
             ctx.beginPath();
             ctx.arc(cx, cy, r, startAngle, startAngle + Math.PI * 0.3);
-            ctx.strokeStyle = `${mint}${Math.max(0, opBase - i * 0.008 + bass * 0.1)})`;
+            ctx.strokeStyle = toRgba(primaryColor, Math.max(0, opBase - i * 0.008 + bass * 0.1));
             ctx.lineWidth = 2;
             ctx.stroke();
           }
@@ -162,7 +178,7 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
             const r = (40 + i * 30 + Math.sin(time * 2 * speedMul + i) * 10) * scaleMul;
             ctx.beginPath();
             ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.strokeStyle = `${mint}${Math.max(0, opBase - i * 0.02 + mid * 0.1)})`;
+            ctx.strokeStyle = toRgba(primaryColor, Math.max(0, opBase - i * 0.02 + mid * 0.1));
             ctx.lineWidth = 1.5;
             ctx.stroke();
           }
@@ -174,7 +190,7 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
             const y = cy + Math.sin(x * 0.02 + time * 3 * speedMul) * (30 + bass * 20) + Math.sin(x * 0.01 + time * 2 * speedMul) * (20 + mid * 15);
             x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
           }
-          ctx.strokeStyle = `${mint}${opBase})`;
+          ctx.strokeStyle = toRgba(primaryColor, opBase);
           ctx.lineWidth = 2;
           ctx.stroke();
           break;
@@ -187,7 +203,7 @@ export default function AudioVisualizer({ mode, onFrequencyData }: Props) {
             ctx.beginPath();
             ctx.moveTo(cx, cy);
             ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
-            ctx.strokeStyle = `${mint}${opBase + Math.sin(time + i) * 0.1 + bass * 0.1})`;
+            ctx.strokeStyle = toRgba(primaryColor, opBase + Math.sin(time + i) * 0.1 + bass * 0.1);
             ctx.lineWidth = 1.5;
             ctx.stroke();
           }

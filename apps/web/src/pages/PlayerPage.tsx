@@ -11,7 +11,10 @@ import QueueList from "../components/QueueList";
 import AudioVisualizer from "../components/AudioVisualizer";
 import FluidBlobs from "../components/FluidBlobs";
 import BorderGlow from "../components/BorderGlow";
+import SpectrumBars from "../components/SpectrumBars";
 import SearchPanel from "../components/SearchPanel";
+import DjPanel from "../components/DjPanel";
+import UserPanel from "../components/UserPanel";
 import { PlayerSkeleton } from "../components/Skeleton";
 import { api } from "../api/client";
 import { wsClient } from "../api/ws";
@@ -48,6 +51,9 @@ export default function PlayerPage() {
 
   const [showSearch, setShowSearch] = useState(false);
   const [coverFlipped, setCoverFlipped] = useState(false);
+  const [showDjPanel, setShowDjPanel] = useState(false);
+  const [showUserPanel, setShowUserPanel] = useState(false);
+  const coverGlowRef = useRef<HTMLDivElement>(null);
 
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [playlistName, setPlaylistName] = useState("");
@@ -79,6 +85,29 @@ export default function PlayerPage() {
       burstParticles(window.innerWidth / 2, window.innerHeight / 2);
     }
   }, [nowPlaying?.songId]);
+
+  // Cover glow animation
+  useEffect(() => {
+    const glow = coverGlowRef.current;
+    if (!glow) return;
+    let frame = 0;
+    const animate = () => {
+      const t = performance.now();
+      if (isPlaying) {
+        const shadow = 30 + bass * 40;
+        const spread = 8 + bass * 12;
+        glow.style.opacity = String(0.3 + bass * 0.5);
+        glow.style.boxShadow = `0 0 ${shadow}px ${spread}px var(--color-primary, #5ee8c5)`;
+      } else {
+        const idle = 0.3 + 0.05 * Math.sin(t * 0.001);
+        glow.style.opacity = String(idle);
+        glow.style.boxShadow = `0 0 30px 8px var(--color-primary, #5ee8c5)`;
+      }
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [isPlaying, bass]);
 
   const statusText =
     djStatus === "idle" ? t("idle")
@@ -176,7 +205,10 @@ export default function PlayerPage() {
           </div>
 
           <div className="dj-header">
-            <div className="dj-avatar"><span style={{ fontSize: 18 }}>🎧</span></div>
+            <div style={{ position: "relative" }}>
+              <div ref={coverGlowRef} className="cover-glow" />
+              <div className="dj-avatar clickable" onClick={() => setShowDjPanel(true)}><span style={{ fontSize: 18 }}>🎧</span></div>
+            </div>
             <div className="dj-info">
               <div className="dj-name">CLAUDIO</div>
               <div className={`dj-status ${djStatus}`}>
@@ -185,95 +217,118 @@ export default function PlayerPage() {
               </div>
             </div>
             <div className="dj-time">{broadcastTime}</div>
+            <button className="user-avatar-btn" onClick={() => setShowUserPanel(true)} title="Your Library">U</button>
           </div>
 
           <AudioSpectrum active={isPlaying} barCount={40} />
         </div>
 
         <div className="player-lower">
-          <div className="song-title-row">
-            <div className="song-title">{nowPlaying?.title ?? t("notPlaying")}</div>
-            {nowPlaying?.songId && (
-              <button
-                className={`fav-btn ${favoriteIds.has(nowPlaying.songId) ? "active" : ""}`}
-                onClick={() => toggleFavorite(nowPlaying.songId!, nowPlaying.title, nowPlaying.artist, nowPlaying.coverUrl)}
-              >
-                {favoriteIds.has(nowPlaying.songId) ? "❤️" : "🤍"}
-              </button>
-            )}
-          </div>
-          <div className="song-artist">{nowPlaying?.artist ?? (scene ? `${scene}` : "")}</div>
-
-          {needsUserAction && (
-            <button className="autoplay-banner" onClick={userActionPlay}>
-              ▶ Tap to Play
-            </button>
-          )}
-
-          <div className="progress-row">
-            <span className="progress-time">{formatTime(displayProgressMs)}</span>
+          <div className="cover-flip-container">
             <div
-              ref={progressRef}
-              className={`progress-track ${dragging ? "dragging" : ""}`}
-              onMouseDown={handleProgressMouseDown}
+              className={`cover-flipper ${coverFlipped ? "flipped" : ""}`}
+              onClick={() => {
+                // Only flip when clicking on the song info area, not on controls
+                setCoverFlipped(!coverFlipped);
+              }}
             >
-              <div
-                className="progress-fill"
-                style={{ width: durationMs > 0 ? `${(displayProgressMs / durationMs) * 100}%` : "0%" }}
-              />
+              {/* Front: Song Info + Controls */}
+              <div className="cover-front">
+                <div className="song-title-row">
+                  <div className="song-title">{nowPlaying?.title ?? t("notPlaying")}</div>
+                  {nowPlaying?.songId && (
+                    <button
+                      className={`fav-btn ${favoriteIds.has(nowPlaying.songId) ? "active" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(nowPlaying.songId!, nowPlaying.title, nowPlaying.artist, nowPlaying.coverUrl);
+                      }}
+                    >
+                      {favoriteIds.has(nowPlaying.songId) ? "❤️" : "🤍"}
+                    </button>
+                  )}
+                </div>
+                <div className="song-artist">{nowPlaying?.artist ?? (scene ? `${scene}` : "")}</div>
+
+                {needsUserAction && (
+                  <button className="autoplay-banner" onClick={(e) => { e.stopPropagation(); userActionPlay(); }}>
+                    ▶ Tap to Play
+                  </button>
+                )}
+
+                <div className="progress-row" onClick={(e) => e.stopPropagation()}>
+                  <span className="progress-time">{formatTime(displayProgressMs)}</span>
+                  <div
+                    ref={progressRef}
+                    className={`progress-track ${dragging ? "dragging" : ""}`}
+                    onMouseDown={handleProgressMouseDown}
+                  >
+                    <div
+                      className="progress-fill"
+                      style={{ width: durationMs > 0 ? `${(displayProgressMs / durationMs) * 100}%` : "0%" }}
+                    />
+                  </div>
+                  <span className="progress-time right">{formatTime(durationMs)}</span>
+                </div>
+
+                {lastError && (
+                  <div className="error-banner" onClick={(e) => { e.stopPropagation(); clearError(); }}>
+                    <span className="error-banner-text">{lastError}</span>
+                    <span className="error-banner-dismiss">✕</span>
+                  </div>
+                )}
+
+                <div className="controls-row" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className={`ctrl-btn ${shuffle ? "active-mode" : ""}`}
+                    onClick={toggleShuffle}
+                    title={`Shuffle: ${shuffle ? "On" : "Off"}`}
+                  >
+                    🔀
+                  </button>
+                  <button className="ctrl-btn" onClick={() => usePlayerStore.getState().previous()}>⏮</button>
+                  <button className="ctrl-btn play-btn" onClick={() => usePlayerStore.getState().togglePlay()}>
+                    {isPlaying ? "⏸" : "▶"}
+                  </button>
+                  <button className="ctrl-btn" onClick={() => usePlayerStore.getState().next()}>⏭</button>
+                  <button
+                    className={`ctrl-btn ${repeatMode !== "off" ? "active-mode" : ""}`}
+                    onClick={cycleRepeat}
+                    title={`Repeat: ${repeatMode}`}
+                  >
+                    {repeatMode === "one" ? "🔂" : "🔁"}
+                  </button>
+                  <div className="player-bar-right">
+                    <button className="volume-btn" onClick={toggleMute} title={isMuted ? "Unmute" : "Mute"}>
+                      {isMuted ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
+                    </button>
+                    <input
+                      className="volume-slider"
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => setVolume(parseFloat(e.target.value))}
+                      title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Back: Lyrics */}
+              <div className="cover-back">
+                <KaraokeLyrics songId={nowPlaying?.songId} currentTimeMs={progressMs} />
+              </div>
             </div>
-            <span className="progress-time right">{formatTime(durationMs)}</span>
           </div>
-
-          {lastError && (
-            <div className="error-banner" onClick={clearError}>
-              <span className="error-banner-text">{lastError}</span>
-              <span className="error-banner-dismiss">✕</span>
-            </div>
-          )}
-
-          <div className="controls-row">
-            <button
-              className={`ctrl-btn ${shuffle ? "active-mode" : ""}`}
-              onClick={toggleShuffle}
-              title={`Shuffle: ${shuffle ? "On" : "Off"}`}
-            >
-              🔀
-            </button>
-            <button className="ctrl-btn" onClick={() => usePlayerStore.getState().previous()}>⏮</button>
-            <button className="ctrl-btn play-btn" onClick={() => usePlayerStore.getState().togglePlay()}>
-              {isPlaying ? "⏸" : "▶"}
-            </button>
-            <button className="ctrl-btn" onClick={() => usePlayerStore.getState().next()}>⏭</button>
-            <button
-              className={`ctrl-btn ${repeatMode !== "off" ? "active-mode" : ""}`}
-              onClick={cycleRepeat}
-              title={`Repeat: ${repeatMode}`}
-            >
-              {repeatMode === "one" ? "🔂" : "🔁"}
-            </button>
-            <div className="player-bar-right">
-              <button className="volume-btn" onClick={toggleMute} title={isMuted ? "Unmute" : "Mute"}>
-                {isMuted ? "🔇" : volume < 0.5 ? "🔉" : "🔊"}
-              </button>
-              <input
-                className="volume-slider"
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={isMuted ? 0 : volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-              />
-            </div>
-          </div>
-
-          <KaraokeLyrics songId={nowPlaying?.songId} currentTimeMs={progressMs} />
         </div>
 
         <WaveformBar barCount={60} />
       </div>
+
+      {/* Bottom spectrum bars */}
+      <SpectrumBars active={isPlaying} />
 
       {/* Chat / AI Conversation */}
       <div className="chat-section">
@@ -351,6 +406,12 @@ export default function PlayerPage() {
           </div>
         </div>
       )}
+
+      {/* DJ Info Panel */}
+      <DjPanel visible={showDjPanel} onClose={() => setShowDjPanel(false)} />
+
+      {/* User Library Panel */}
+      <UserPanel visible={showUserPanel} onClose={() => setShowUserPanel(false)} />
     </div>
   );
 }
