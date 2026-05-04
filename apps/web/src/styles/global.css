@@ -4028,7 +4028,7 @@ button {
 /* ===== Player Content Layout (Cover + Lyrics Side by Side) ===== */
 .player-content {
   display: flex;
-  gap: 32px;
+  gap: 24px;
   align-items: flex-start;
 }
 
@@ -4042,8 +4042,8 @@ button {
 
 .cover-disc {
   position: relative;
-  width: 280px;
-  height: 280px;
+  width: 180px;
+  height: 180px;
   border-radius: 50%;
   overflow: hidden;
   box-shadow:
@@ -4089,7 +4089,7 @@ button {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  height: 320px;
+  height: 440px;
 }
 
 .lyrics-header {
@@ -4115,6 +4115,9 @@ button {
   overflow-y: auto;
   min-height: 0;
   padding-right: 4px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-secondary);
 }
 
 .lyrics-body::-webkit-scrollbar {
