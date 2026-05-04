@@ -233,8 +233,9 @@ body::after {
 
 .main-inner {
   width: 100%;
-  max-width: 1200px;
+  max-width: 480px;
   animation: fadeUp 0.5s ease-out;
+  position: relative;
 }
 
 @keyframes fadeUp {
@@ -242,47 +243,56 @@ body::after {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== Player Main Area (Sidebars + Center) ===== */
-.player-main-area {
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  min-height: 0;
+/* ===== Player Card (needs relative for sidebar positioning) ===== */
+.player-card {
   position: relative;
-  overflow: visible;
 }
 
-/* ===== Sidebars ===== */
+/* ===== Sidebars (absolute overlay on card sides) ===== */
 .sidebar-left,
 .sidebar-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              min-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.25s ease,
-              margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 300px;
   opacity: 0;
-  background: var(--bg-glass);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              visibility 0.3s,
+              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--bg-card);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
+  border-radius: var(--radius-lg);
+  z-index: 20;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+
+.sidebar-left {
+  right: calc(100% + 8px);
+  transform: translateX(10px);
+}
+
+.sidebar-right {
+  left: calc(100% + 8px);
+  transform: translateX(-10px);
 }
 
 .sidebar-left.open,
 .sidebar-right.open {
-  width: 320px;
-  min-width: 320px;
   opacity: 1;
-  margin: 0 12px;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .sidebar-header {
-  padding: 12px 16px;
+  padding: 14px 16px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
@@ -306,8 +316,8 @@ body::after {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
-  padding: 4px;
+  font-size: 16px;
+  padding: 4px 8px;
   border-radius: 4px;
   transition: color 0.2s;
 }
@@ -316,15 +326,15 @@ body::after {
   color: var(--text-primary);
 }
 
-/* ===== Sidebar Float Buttons ===== */
+/* ===== Sidebar Float Buttons (always visible on card edges) ===== */
 .sidebar-float-btn {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 24px;
-  height: 60px;
+  width: 28px;
+  height: 80px;
   border: 1px solid var(--border);
-  background: var(--bg-glass);
+  background: var(--bg-card);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: var(--text-secondary);
@@ -332,29 +342,37 @@ body::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  z-index: 10;
+  font-size: 13px;
+  z-index: 15;
   transition: all 0.2s;
-  border-radius: 4px;
-  opacity: 0.6;
+  opacity: 0.7;
 }
 
 .sidebar-float-btn:hover {
   opacity: 1;
-  background: var(--bg-card);
   color: var(--text-primary);
+  background: var(--bg-glass);
+  width: 32px;
 }
 
 .sidebar-float-btn.left {
-  left: 0;
-  border-left: none;
-  border-radius: 0 4px 4px 0;
+  left: -28px;
+  border-radius: 8px 0 0 8px;
+  border-right: none;
 }
 
 .sidebar-float-btn.right {
-  right: 0;
-  border-right: none;
-  border-radius: 4px 0 0 4px;
+  right: -28px;
+  border-radius: 0 8px 8px 0;
+  border-left: none;
+}
+
+.sidebar-float-btn.left:hover {
+  left: -32px;
+}
+
+.sidebar-float-btn.right:hover {
+  right: -32px;
 }
 
 /* ===== Theme Section ===== */
@@ -4187,24 +4205,20 @@ button {
     height: 260px;
   }
 
-  /* Sidebars overlay on mobile */
-  .sidebar-left.open,
-  .sidebar-right.open {
-    position: absolute;
-    top: 0;
-    bottom: 0;
+  /* Sidebars: wider on mobile, positioned inside card */
+  .sidebar-left,
+  .sidebar-right {
     width: 85vw;
-    min-width: 85vw;
-    max-width: 85vw;
-    z-index: 100;
-    margin: 0;
+    border-radius: var(--radius-md);
   }
 
-  .sidebar-left.open {
+  .sidebar-left {
+    right: auto;
     left: 0;
   }
 
-  .sidebar-right.open {
+  .sidebar-right {
+    left: auto;
     right: 0;
   }
 
