@@ -233,7 +233,7 @@ body::after {
 
 .main-inner {
   width: 100%;
-  max-width: 480px;
+  max-width: 1200px;
   animation: fadeUp 0.5s ease-out;
 }
 
@@ -242,54 +242,119 @@ body::after {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== Chat Section (Below Player) ===== */
-.chat-section {
-  margin-top: 20px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-glass);
-  overflow: hidden;
-  max-height: 350px;
+/* ===== Player Main Area (Sidebars + Center) ===== */
+.player-main-area {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  min-height: 0;
+  position: relative;
+  overflow: visible;
+}
+
+/* ===== Sidebars ===== */
+.sidebar-left,
+.sidebar-right {
   display: flex;
   flex-direction: column;
-}
-
-.chat-section .chat-area {
-  flex: 1;
-  min-height: 0;
+  width: 0;
+  min-width: 0;
   overflow: hidden;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.25s ease,
+              margin 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
 }
 
-.chat-section .chat-messages {
-  max-height: 260px;
-  padding: 12px;
+.sidebar-left.open,
+.sidebar-right.open {
+  width: 320px;
+  min-width: 320px;
+  opacity: 1;
+  margin: 0 12px;
 }
 
-/* ===== Extras Toggle ===== */
-.extras-toggle {
-  margin-top: 16px;
-  text-align: center;
+.sidebar-header {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.extras-btn {
-  padding: 8px 20px;
-  border-radius: var(--radius-pill);
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 8px;
+}
+
+.sidebar-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+
+.sidebar-close-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ===== Sidebar Float Buttons ===== */
+.sidebar-float-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 60px;
   border: 1px solid var(--border);
   background: var(--bg-glass);
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.extras-btn:hover {
-  border-color: var(--border-light);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  z-index: 10;
+  transition: all 0.2s;
+  border-radius: 4px;
+  opacity: 0.6;
 }
 
-.extras-panel {
-  margin-top: 12px;
-  animation: fadeUp 0.3s ease-out;
+.sidebar-float-btn:hover {
+  opacity: 1;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.sidebar-float-btn.left {
+  left: 0;
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+}
+
+.sidebar-float-btn.right {
+  right: 0;
+  border-right: none;
+  border-radius: 4px 0 0 4px;
 }
 
 /* ===== Theme Section ===== */
@@ -550,44 +615,6 @@ body::after {
 
 /* ===== Player Card (Compact) ===== */
 
-/* ===== Theme Section ===== */
-.theme-section {
-  padding: 0 4px;
-}
-
-.theme-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.theme-btn {
-  padding: 6px 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--bg-glass);
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.theme-btn:hover {
-  border-color: var(--border-light);
-  color: var(--text-secondary);
-}
-
-.theme-btn.active {
-  border-color: var(--border-mint);
-  color: var(--mint);
-  background: var(--mint-subtle);
-}
-
-/* ===== Queue Section ===== */
-.queue-section {
-  padding: 0 4px;
-}
-
 /* ===== Autoplay Banner ===== */
 .autoplay-banner {
   width: 100%;
@@ -622,6 +649,7 @@ body::after {
   box-shadow: var(--shadow-card);
   background: var(--bg-card);
   animation: cardEnter 0.6s ease-out;
+  position: relative;
 }
 
 @keyframes cardEnter {
@@ -2746,12 +2774,6 @@ body::after {
   background: rgba(240, 96, 96, 0.15);
 }
 
-/* ===== Search Toggle ===== */
-.search-toggle {
-  margin-top: 16px;
-  text-align: center;
-}
-
 /* ===== Search Panel ===== */
 .search-panel {
   margin-top: 12px;
@@ -3779,6 +3801,20 @@ html.theme-transitioning *::after {
   background: var(--bg-glass-strong);
 }
 
+/* Sidebar light theme */
+[data-theme="light"] .sidebar-left,
+[data-theme="light"] .sidebar-right {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border);
+}
+[data-theme="light"] .sidebar-float-btn {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border);
+}
+[data-theme="light"] .sidebar-float-btn:hover {
+  background: var(--bg-card);
+}
+
 /* Autoplay banner */
 [data-theme="light"] .autoplay-banner {
   background: var(--mint);
@@ -4149,6 +4185,31 @@ button {
   .lyrics-section {
     width: 100%;
     height: 260px;
+  }
+
+  /* Sidebars overlay on mobile */
+  .sidebar-left.open,
+  .sidebar-right.open {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 85vw;
+    min-width: 85vw;
+    max-width: 85vw;
+    z-index: 100;
+    margin: 0;
+  }
+
+  .sidebar-left.open {
+    left: 0;
+  }
+
+  .sidebar-right.open {
+    right: 0;
+  }
+
+  .sidebar-float-btn {
+    display: none;
   }
 }
 
