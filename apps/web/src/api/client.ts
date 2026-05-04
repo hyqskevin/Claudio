@@ -287,4 +287,8 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ songs }),
         }),
+    getPlaybackState: () => fetch("/api/playback-state").then(r => r.ok ? r.json() : null),
+    savePlaybackState: (state: unknown) => fetch("/api/playback-state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) }).then(r => r.ok),
+    getSchedule: () => fetch("/api/schedule").then(r => r.ok ? r.json() : []),
+    getUserConfig: () => fetch("/api/user-config").then(r => r.ok ? r.json() : []),
 };

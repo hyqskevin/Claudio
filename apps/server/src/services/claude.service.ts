@@ -24,6 +24,7 @@ export interface PlanResponse {
     summary: string;
     scene: string;
     items: PlanItem[];
+    memory?: Array<{ file: string; add: string }>;
 }
 
 export interface ClaudeService {
@@ -84,6 +85,7 @@ interface ClaudeRawResponse {
     scene: string;
     djLines?: Array<{ position: string; text: string }>;
     songs?: Array<{ query?: string; songId?: string; reason: string }>;
+    memory?: Array<{ file: string; add: string }>;
 }
 
 export class ClaudeApiService implements ClaudeService {
@@ -357,6 +359,7 @@ export class ClaudeApiService implements ClaudeService {
             summary: raw.summary ?? "已生成播放计划",
             scene: raw.scene ?? request.scene ?? "default",
             items,
+            memory: raw.memory,
         };
     }
 

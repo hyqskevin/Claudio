@@ -103,10 +103,18 @@ NCM_PASSWORD=your_password   # 网易云密码（可选）
 PORT=8080
 ```
 
+### 一键启动
+
+```bash
+./start.sh
+```
+
+自动启动 NCM API 服务 + 前后端 dev server，`Ctrl+C` 停止所有服务。
+
 ### 开发
 
 ```bash
-# 同时启动前端和后端
+# 同时启动前端和后端（不含 NCM 代理）
 pnpm dev
 
 # 单独启动后端
@@ -114,10 +122,14 @@ pnpm --filter @ai-radio/server dev
 
 # 单独启动前端
 pnpm --filter @ai-radio/web dev
+
+# 单独启动 NCM 代理
+node apps/server/ncm-server.mjs
 ```
 
-- 后端：http://localhost:8080
-- 前端：http://localhost:5173
+- 后端 API：http://localhost:8080
+- 前端页面：http://localhost:5173
+- NCM 代理：http://localhost:3000
 
 ### 构建
 

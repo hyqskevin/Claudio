@@ -146,6 +146,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     songs: collectedSongs.length > 0 ? collectedSongs : undefined,
                 };
 
+                // TODO: speak AI segue when voice mode is enabled
+
                 set((s) => ({
                     messages: [...s.messages, aiMsg],
                     streamingText: "",

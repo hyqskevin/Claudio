@@ -21,6 +21,7 @@ import { coverRoutes } from "./routes/cover.js";
 import { searchRoutes } from "./routes/search.js";
 import { queueRoutes } from "./routes/queue.js";
 import { chatRoutes } from "./routes/chat.js";
+import { scheduleRoutes } from "./routes/schedule.js";
 import { MockNcmService, NeteaseNcmService } from "./services/ncm.service.js";
 import { MockClaudeService, ClaudeApiService } from "./services/claude.service.js";
 import { readFileSync } from "node:fs";
@@ -115,6 +116,7 @@ await app.register(coverRoutes);
 await app.register(searchRoutes);
 await app.register(queueRoutes);
 await app.register(chatRoutes);
+await app.register(scheduleRoutes);
 
 // Serve frontend static files (SPA fallback)
 const webDist = join(__dirname, "../../web/dist");

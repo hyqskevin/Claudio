@@ -1,15 +1,35 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { enrichPlanItems } from "../helpers/plan-enrich.js";
+import { processMemoryEntries } from "../helpers/memory-writer.js";
 
 const StreamChatSchema = z.object({
     text: z.string().min(1).max(500),
 });
 
+// Fast-path command detection (no Claude call needed)
+function detectCommand(text: string): { type: string; action?: string; keyword?: string } | null {
+    if (text === "播放") return { type: "command", action: "play" };
+    if (text.includes("下一首")) return { type: "command", action: "next" };
+    if (text.includes("上一首")) return { type: "command", action: "prev" };
+    if (text.includes("暂停")) return { type: "command", action: "pause" };
+    if (text.includes("随机播放")) return { type: "command", action: "shuffle" };
+    if (text.startsWith("搜索")) {
+        const keyword = text.replace(/^搜索/, "").trim();
+        if (keyword) return { type: "music_search", keyword };
+    }
+    return null;
+}
+
 export async function intentRoutes(app: FastifyInstance) {
     // Original non-streaming endpoint (kept for backward compatibility)
     app.post("/api/intent", async (request) => {
         const { text } = StreamChatSchema.parse(request.body);
+
+        // Fast-path: return commands immediately without calling Claude
+        const cmd = detectCommand(text);
+        if (cmd) return cmd;
+
         const { claude, context, ncm, tts } = app.services;
 
         const contextStr = await context.buildContext(text);
@@ -17,6 +37,15 @@ export async function intentRoutes(app: FastifyInstance) {
             { trigger: "manual", input: text, maxSongs: 8, withDj: true },
             contextStr
         );
+
+        // Process memory entries from AI response
+        if (Array.isArray(plan.memory) && plan.memory.length > 0) {
+            try {
+                await processMemoryEntries(plan.memory);
+            } catch (err) {
+                console.error("[intent] memory write failed:", err);
+            }
+        }
 
         const planId = `plan_${Date.now()}`;
         const items = await enrichPlanItems(ncm, tts, plan.items, planId);
@@ -60,6 +89,15 @@ export async function intentRoutes(app: FastifyInstance) {
                     sendEvent("chunk", { text: chunk });
                 }
             );
+
+            // Process memory entries from AI response
+            if (Array.isArray(plan.memory) && plan.memory.length > 0) {
+                try {
+                    await processMemoryEntries(plan.memory);
+                } catch (err) {
+                    console.error("[chat/stream] memory write failed:", err);
+                }
+            }
 
             // Send plan metadata
             sendEvent("plan", {

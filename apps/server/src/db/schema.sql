@@ -87,3 +87,18 @@ CREATE TABLE IF NOT EXISTS favorites (
   cover_url TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS playback_state (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  current_song_id TEXT,
+  current_song_name TEXT,
+  current_song_artist TEXT,
+  current_song_album TEXT,
+  current_song_cover TEXT,
+  progress_seconds REAL DEFAULT 0,
+  queue_data TEXT,
+  queue_index INTEGER DEFAULT 0,
+  play_mode TEXT DEFAULT 'off',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO playback_state (id) VALUES (1);

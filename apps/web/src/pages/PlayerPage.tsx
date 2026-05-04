@@ -13,6 +13,8 @@ import SearchPanel from "../components/SearchPanel";
 import { PlayerSkeleton } from "../components/Skeleton";
 import { api } from "../api/client";
 import { wsClient } from "../api/ws";
+import { extractColors } from "../utils/colorExtractor";
+import { burstParticles } from "../components/ParticleCanvas";
 
 const VISUAL_MODES = [
   { name: "Glob", key: "Glob" },
@@ -28,7 +30,7 @@ type ModeKey = (typeof VISUAL_MODES)[number]["key"];
 export default function PlayerPage() {
   const {
     nowPlaying, queue, scene, djStatus, isPlaying, needsUserAction, progressMs, durationMs,
-    fetchNow, playItem, userActionPlay,
+    fetchNow, playItem, userActionPlay, restorePlayback,
     shuffle, repeatMode, toggleShuffle, cycleRepeat,
     lastError, clearError,
     favoriteIds, loadFavorites, toggleFavorite,
@@ -41,6 +43,7 @@ export default function PlayerPage() {
   const [initialLoaded, setInitialLoaded] = useState(false);
 
   const [showSearch, setShowSearch] = useState(false);
+  const [coverFlipped, setCoverFlipped] = useState(false);
 
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [playlistName, setPlaylistName] = useState("");

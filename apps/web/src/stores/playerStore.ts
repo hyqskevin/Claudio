@@ -37,6 +37,11 @@ interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
 
+  // Playback persistence
+  playbackRestored: boolean;
+  restorePlayback: () => Promise<void>;
+  savePlaybackState: () => void;
+
   // Error
   lastError: string | null;
   clearError: () => void;
@@ -157,6 +162,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     scene: null,
     djStatus: "idle",
     planLoading: false,
+    playbackRestored: false,
 
     // Volume
     volume: 1,
@@ -182,6 +188,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     shuffle: false,
     toggleShuffle: () => {
       set((s) => ({ shuffle: !s.shuffle }));
+      get().savePlaybackState();
     },
     cycleRepeat: () => {
       set((s) => {
@@ -189,6 +196,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
         const idx = modes.indexOf(s.repeatMode);
         return { repeatMode: modes[(idx + 1) % 3] };
       });
+      get().savePlaybackState();
     },
 
     // Error
@@ -280,6 +288,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       }
       audioPlayer.updateMetadata(item.title ?? "", item.artist ?? "", item.coverUrl ?? "");
       set({ nowPlaying: item, progressMs: 0, lastError: null });
+      get().savePlaybackState();
       if (item.type === "song" && item.songId) {
         api.reportPlay({
           songId: item.songId,
@@ -363,6 +372,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     setProgress: (ms: number) => {
       audioPlayer.seek(ms);
       set({ progressMs: ms });
+      get().savePlaybackState();
     },
 
     setQueue: (items: QueueItem[]) => {
@@ -387,6 +397,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
 
       const first = queueItems[0] ?? null;
       set({ queue: queueItems, nowPlaying: first, progressMs: 0 });
+      get().savePlaybackState();
       if (first?.audioUrl) {
         audioPlayer.load(first.audioUrl);
         audioPlayer.play();
@@ -421,6 +432,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
         get().setQueue([...queue, ...newItems]);
       } else {
         set({ queue: [...queue, ...newItems] });
+        get().savePlaybackState();
       }
     },
 
@@ -445,5 +457,126 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       audioPlayer.retryPlay();
       set({ needsUserAction: false });
     },
+
+    restorePlayback: async () => {
+      try {
+        const state = await api.getPlaybackState();
+        if (!state?.currentSongId) {
+          set({ playbackRestored: true });
+          return;
+        }
+        const restored: QueueItem = {
+          id: `restored_${state.currentSongId}`,
+          type: "song",
+          songId: state.currentSongId,
+          title: state.currentSongName,
+          artist: state.currentSongArtist,
+          coverUrl: state.currentSongCover,
+          audioUrl: `/api/audio?id=${encodeURIComponent(state.currentSongId)}&title=${encodeURIComponent(state.currentSongName ?? "")}&artist=${encodeURIComponent(state.currentSongArtist ?? "")}`,
+          status: "playing",
+        };
+
+        let restoredQueue: QueueItem[] = [];
+        if (state.queueData) {
+          try {
+            const parsed = JSON.parse(state.queueData);
+            if (Array.isArray(parsed)) {
+              restoredQueue = parsed.map((item: string | { id?: string; songId?: string; title?: string; artist?: string; coverUrl?: string }, i: number) => {
+                if (typeof item === "string") {
+                  return {
+                    id: `q_${item}_${i}`,
+                    type: "song" as const,
+                    songId: item,
+                    title: undefined,
+                    artist: undefined,
+                    coverUrl: undefined,
+                    audioUrl: `/api/audio?id=${encodeURIComponent(item)}`,
+                    status: "pending" as const,
+                  };
+                }
+                return {
+                  id: item.id ?? `q_${item.songId ?? i}_${i}`,
+                  type: "song" as const,
+                  songId: item.songId,
+                  title: item.title,
+                  artist: item.artist,
+                  coverUrl: item.coverUrl,
+                  audioUrl: `/api/audio?id=${encodeURIComponent(item.songId ?? "")}`,
+                  status: "pending" as const,
+                };
+              });
+            }
+          } catch { /* ignore parse errors */ }
+        }
+
+        // Map server repeat mode to client
+        let repeatMode: RepeatMode = "off";
+        if (state.play_mode === "one") repeatMode = "one";
+        else if (state.play_mode === "all") repeatMode = "all";
+
+        set({
+          nowPlaying: restored,
+          queue: restoredQueue.length > 0 ? restoredQueue : [restored],
+          repeatMode,
+          shuffle: state.shuffle ?? false,
+          progressMs: (state.progressSeconds ?? 0) * 1000,
+          playbackRestored: true,
+        });
+
+        if (restored.audioUrl) {
+          audioPlayer.load(restored.audioUrl);
+        }
+      } catch {
+        set({ playbackRestored: true });
+      }
+    },
+
+    savePlaybackState: (() => {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      return () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          const { nowPlaying, queue, repeatMode, shuffle, progressMs } = get();
+          const play_mode = repeatMode === "one" ? "one" : repeatMode === "all" ? "all" : "off";
+          const queueIndex = nowPlaying ? queue.findIndex(q => q.id === nowPlaying.id) : 0;
+          api.savePlaybackState({
+            currentSongId: nowPlaying?.songId,
+            currentSongName: nowPlaying?.title,
+            currentSongArtist: nowPlaying?.artist,
+            currentSongAlbum: undefined,
+            currentSongCover: nowPlaying?.coverUrl,
+            queueData: JSON.stringify(queue.map(q => ({ id: q.id, songId: q.songId, title: q.title, artist: q.artist, coverUrl: q.coverUrl }))),
+            queueIndex: queueIndex >= 0 ? queueIndex : 0,
+            play_mode,
+            shuffle,
+            progressSeconds: Math.floor(progressMs / 1000),
+          });
+        }, 500);
+      };
+    })(),
   };
 });
+
+// Music ducking — lower volume during voice synthesis
+if (typeof window !== "undefined") {
+  let savedVolume = 0.8;
+
+  window.addEventListener("voiceStart", () => {
+    const store = usePlayerStore.getState();
+    savedVolume = store.volume;
+    usePlayerStore.setState({ volume: 0.2 });
+    audioPlayer.setVolume(0.2);
+  });
+
+  window.addEventListener("voiceEnd", () => {
+    let current = 0.2;
+    const fade = setInterval(() => {
+      current = Math.min(current + 0.05, savedVolume);
+      usePlayerStore.setState({ volume: current });
+      audioPlayer.setVolume(current);
+      if (current >= savedVolume) clearInterval(fade);
+    }, 50);
+  });
+}
+
+// TODO: Import and call extractColors(nowPlaying.cover) when song changes
