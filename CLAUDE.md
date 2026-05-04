@@ -7,10 +7,11 @@
 - WebSocket for real-time updates (now_playing, queue, DJ messages)
 
 ## Key Commands
-- `pnpm dev` — start both server (:8080) and web (:5173) concurrently
-- `pnpm --filter @claudio/server build` — build server
-- `pnpm --filter @claudio/web build` — build web (outputs to apps/web/dist)
-- `cd apps/server && pnpm dev` — server only (ts-node --watch)
+- `./start.sh` — **一键启动**（自动关闭旧进程 → NCM :3000 → 后端 :8080 → 前端 :5173，Ctrl+C 全部停止）
+- `pnpm dev` — start both server (:8080) and web (:5173) concurrently (不启动 NCM，不清理旧进程)
+- `pnpm --filter @ai-radio/server build` — build server
+- `pnpm --filter @ai-radio/web build` — build web (outputs to apps/web/dist)
+- `cd apps/server && pnpm dev` — server only (tsx watch src/index.ts)
 - `cd apps/web && pnpm dev` — web only (Vite dev server)
 
 ## Code Standards

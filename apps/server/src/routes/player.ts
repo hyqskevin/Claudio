@@ -16,7 +16,7 @@ import {
   addFavorite,
   removeFavorite,
 } from "../db/plays.repo.js";
-import { getPlaybackState, updatePlaybackState, type PlaybackState } from "../db/playback.repo.js";
+
 
 let isPlaying = true;
 
@@ -131,14 +131,4 @@ export async function playerRoutes(app: FastifyInstance) {
     return { ok: removed };
   });
 
-  // Playback state persistence (survives restarts)
-  app.get("/api/playback-state", async () => {
-    return getPlaybackState();
-  });
-
-  app.put("/api/playback-state", async (request) => {
-    const body = request.body as Record<string, unknown>;
-    updatePlaybackState(body as Partial<PlaybackState>);
-    return { ok: true };
-  });
 }
