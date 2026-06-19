@@ -32,7 +32,7 @@ import { MockClaudeService, ClaudeApiService } from "./services/claude.service.j
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MockTtsService, FishTtsService } from "./services/tts.service.js";
+import { MockTtsService, FishTtsService, MinimaxTtsService } from "./services/tts.service.js";
 import { MockWeatherService, OpenWeatherService, WttrInService } from "./services/weather.service.js";
 import { MockCalendarService, FeishuCalendarService } from "./services/calendar.service.js";
 import { MockUpnpService } from "./services/upnp.service.js";
@@ -68,8 +68,16 @@ const claude = claudeApiKey
       );
     })()
   : new MockClaudeService();
+const minimaxTtsKey = getSetting("minimax_api_key") ?? config.minimaxTts.apiKey;
 const fishApiKey = getSetting("fish_audio_api_key") ?? config.fishAudio.apiKey;
-const tts = fishApiKey
+const tts = minimaxTtsKey
+  ? new MinimaxTtsService({
+      apiKey: minimaxTtsKey,
+      voiceId: config.minimaxTts.voiceId,
+      model: config.minimaxTts.model,
+      endpoint: config.minimaxTts.endpoint,
+    })
+  : fishApiKey
   ? new FishTtsService({ apiKey: fishApiKey, voiceId: config.fishAudio.voiceId })
   : new MockTtsService();
 const weatherApiKey = getSetting("openweather_api_key") ?? config.openWeather.apiKey;
@@ -102,7 +110,7 @@ app.get("/api/health", async () => ({
   services: {
     ncm: config.ncm.apiBaseUrl ? "connected" : "mock",
     claude: claudeApiKey ? "connected" : "mock",
-    tts: fishApiKey ? "connected" : "mock",
+    tts: minimaxTtsKey ? "minimax" : fishApiKey ? "fish" : "mock",
     weather: weatherApiKey ? "connected" : "wttr.in",
     calendar: feishuAppId ? "connected" : "mock",
     scheduler: claudeApiKey ? "cron" : "mock",

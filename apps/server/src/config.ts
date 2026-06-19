@@ -14,6 +14,17 @@ export interface AppConfig {
     apiKey: string;
     voiceId: string;
   };
+  /**
+   * MiniMax TTS — 国内 TTS 服务
+   * 文档要求嵌套 voice_setting / audio_setting，
+   * 音频以 hex 编码返回（详见 MinimaxTtsService）。
+   */
+  minimaxTts: {
+    apiKey: string;
+    voiceId: string;
+    model: string;
+    endpoint: string;
+  };
   openWeather: {
     apiKey: string;
     city: string;
@@ -44,6 +55,12 @@ export function loadConfig(): AppConfig {
     fishAudio: {
       apiKey: env("FISH_AUDIO_API_KEY"),
       voiceId: env("FISH_AUDIO_VOICE_ID"),
+    },
+    minimaxTts: {
+      apiKey: env("MINIMAX_API_KEY"),
+      voiceId: env("MINIMAX_TTS_VOICE_ID", "male-qn-qingse"),
+      model: env("MINIMAX_TTS_MODEL", "speech-01-turbo"),
+      endpoint: env("MINIMAX_TTS_ENDPOINT", "https://api.minimaxi.com/v1/t2a_v2"),
     },
     openWeather: {
       apiKey: env("OPENWEATHER_API_KEY"),
