@@ -202,12 +202,15 @@ body::after {
 }
 
 .lang-toggle {
-  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--t-fast);
@@ -216,9 +219,19 @@ body::after {
 }
 
 .lang-toggle:hover {
-  border-color: var(--border-light);
-  color: var(--text-primary);
-  background: var(--bg-glass);
+  border-color: var(--border-mint);
+  color: var(--mint);
+  background: var(--mint-subtle);
+}
+
+.lang-toggle-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.lang-toggle-label {
+  min-width: 18px;
+  text-align: center;
 }
 
 /* ===== Main Content ===== */
