@@ -3,7 +3,10 @@
 ## Architecture
 - pnpm monorepo: apps/server (Fastify + TypeScript) + apps/web (React 19 + Vite + PWA)
 - SQLite via better-sqlite3 for settings, playlists, plays history
-- Claude AI for music planning, Fish Audio for TTS, Netease Cloud Music for songs
+- **LLM chain**: MiniMax M3 (Anthropic-compat, primary) → Kimi/Moonshot (OpenAI-compat, fallback) → Mock. Routed via `LlmRouter` in `apps/server/src/services/claude.service.ts`.
+- **TTS chain**: MiniMax TTS (primary, 国内 hex-encoded MP3) → Fish Audio (fallback) → Mock. Three-tier wired in `apps/server/src/index.ts`.
+- **NCM audio**: `/audio` endpoint on ncm-server.mjs falls back to yt-dlp when NCM has no streaming URL (copyright/region-blocked). Headers auto-negotiated per CDN.
+- **TTS warmup**: 15 common DJ phrases pre-synthesized on server startup (`apps/server/src/services/tts-warmup.ts`), hit cache in <10ms.
 - WebSocket for real-time updates (now_playing, queue, DJ messages)
 
 ## Key Commands
@@ -34,9 +37,9 @@
 - apps/web/src/api/ — API client + WebSocket client
 
 ## Current Features
-- AI-powered music planning (Claude generates playlists based on context)
-- NCM song search and playback with real audio streaming
-- DJ TTS messages between songs (DjMessages + ChatArea)
+- AI-powered music planning (MiniMax M3 → Kimi fallback; JSON-structured plans with DJ lines + songs)
+- NCM song search and playback with real audio streaming (yt-dlp fallback for blocked tracks)
+- DJ TTS messages between songs (DjMessages + ChatArea; MiniMax TTS pre-warmed cache)
 - LRC/karaoke lyrics display (KaraokeLyrics + LyricsPanel)
 - 6 audio visualization modes (AudioVisualizer + AudioSpectrum)
 - Playlist CRUD + NCM playlist browsing
@@ -46,13 +49,14 @@
 - Keyboard shortcuts + MediaSession API (lock screen/earphone controls)
 - Toast notification system + loading skeletons
 - MiniPlayer bottom bar
-- Bilingual (EN/ZH) i18n
+- Bilingual (EN/ZH) i18n with toggle button (🌐 icon, tooltip) in top nav
 - PWA with service worker
 - Profile page with real play stats (top artists, minutes listened, favorites)
 
 ## Known Gaps (to fix)
 - /api/now and /api/player use mock queue (Task 1 in progress)
 - WebSocket events not fully wired (Task 2 in progress)
-- Scheduler cron tasks are stubs (Task 2 in progress)
+- Scheduler cron `daily-playlist`/`morning-plan` generate plans but don't insert into queue table
+- LLM feedback loop: user favorites/dislikes aren't weighted in prompts (memory writer writes to user/*.md but no re-injection)
 - No drag-to-reorder queue
 - No UPnP casting
