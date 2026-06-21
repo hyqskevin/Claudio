@@ -84,8 +84,14 @@ export default function App() {
 
         <div className="nav-actions">
           <ThemeToggle isDark={isDark} onToggle={toggleTheme} />
-          <button className="lang-toggle" onClick={toggleLang}>
-            {lang === "en" ? "ZH" : "EN"}
+          <button
+            className="lang-toggle"
+            onClick={toggleLang}
+            title={lang === "en" ? "Switch to 中文" : "切换到 English"}
+            aria-label={lang === "en" ? "Switch to 中文" : "切换到 English"}
+          >
+            <span className="lang-toggle-icon" aria-hidden="true">🌐</span>
+            <span className="lang-toggle-label">{lang === "en" ? "EN" : "中"}</span>
           </button>
         </div>
       </nav>

@@ -262,19 +262,38 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (!audioUrl) {
-        res.statusCode = 404;
-        res.end(JSON.stringify({ error: "no audio url" }));
-        return;
+        // Fallback to YouTube via yt-dlp (NCM may block due to copyright/region)
+        if (title) {
+          const query = artist ? `${title} ${artist}` : title;
+          console.log(`[ncm] /audio no NCM URL for ${id}, trying yt-dlp: ${query}`);
+          const ytUrl = await getYoutubeAudioUrl(query);
+          if (ytUrl) {
+            audioUrl = ytUrl;
+            console.log(`[ncm] /audio yt-dlp fallback OK for ${id}`);
+          }
+        }
+        if (!audioUrl) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "no audio url (NCM and yt-dlp both failed)" }));
+          return;
+        }
       }
 
+      // YouTube CDN needs browser-like UA and Range support; NCM CDN uses Referer-based auth
+      const isYoutube = /youtube\.com|googlevideo\.com|youtu\.be/i.test(audioUrl);
+      const fetchHeaders = isYoutube
+        ? {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            Range: "bytes=0-",
+          }
+        : {
+            "User-Agent": AGENT,
+            Referer: "https://music.163.com/",
+            Cookie: NCM_COOKIE,
+          };
+
       // Fetch audio from CDN with proper headers
-      let audioRes = await fetch(audioUrl, {
-        headers: {
-          "User-Agent": AGENT,
-          Referer: "https://music.163.com/",
-          Cookie: NCM_COOKIE,
-        },
-      });
+      let audioRes = await fetch(audioUrl, { headers: fetchHeaders });
 
       // If CDN returns 403, try UnblockNeteaseMusic multi-source matching
       if (!audioRes.ok && audioRes.status === 403 && matchSong) {

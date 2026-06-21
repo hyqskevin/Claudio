@@ -109,3 +109,100 @@ export class FishTtsService implements TtsService {
     }
   }
 }
+
+export class MinimaxTtsService implements TtsService {
+  private apiKey: string;
+  private voiceId: string;
+  private model: string;
+  private endpoint: string;
+  private cacheDir: string;
+
+  constructor(config: { apiKey: string; voiceId: string; model?: string; endpoint?: string }) {
+    this.apiKey = config.apiKey;
+    this.voiceId = config.voiceId;
+    this.model = config.model ?? "speech-01-turbo";
+    this.endpoint = config.endpoint ?? "https://api.minimaxi.com/v1/t2a_v2";
+    this.cacheDir = CACHE_DIR;
+    mkdirSync(this.cacheDir, { recursive: true });
+  }
+
+  async synthesize(text: string): Promise<string> {
+    // MiniMax 单次请求最多 10000 字符；与 Fish 一致保守截断到 500
+    if (text.length > 500) {
+      text = text.slice(0, 500);
+    }
+
+    const hash = createHash("sha256").update(text + "|" + this.voiceId).digest("hex").slice(0, 16);
+    const filename = `${hash}.mp3`;
+    const filepath = join(this.cacheDir, filename);
+
+    if (existsSync(filepath) && readFileSync(filepath).length > 0) {
+      return `/api/media/tts/${hash}`;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+
+      const body = {
+        model: this.model,
+        text,
+        stream: false,
+        output_format: "hex",
+        voice_setting: {
+          voice_id: this.voiceId,
+          speed: 1.0,
+          vol: 1.0,
+          pitch: 0,
+        },
+        audio_setting: {
+          sample_rate: 32000,
+          bitrate: 128000,
+          format: "mp3",
+          channel: 1,
+        },
+      };
+
+      const res = await fetch(this.endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        throw new Error(`MiniMax TTS API ${res.status}: ${res.statusText}`);
+      }
+
+      const json = (await res.json()) as {
+        base_resp?: { status_code: number; status_msg: string };
+        data?: { audio?: string; status?: number; ced?: string };
+      };
+
+      // MiniMax 在 HTTP 200 但业务失败时也会返回 status_code != 0
+      if (json.base_resp && json.base_resp.status_code !== 0) {
+        throw new Error(
+          `MiniMax TTS business error ${json.base_resp.status_code}: ${json.base_resp.status_msg}`
+        );
+      }
+
+      const audioHex = json.data?.audio;
+      if (!audioHex) {
+        throw new Error("MiniMax TTS response missing data.audio");
+      }
+
+      // data.audio 是 hex 编码的 MP3 二进制
+      const buffer = Buffer.from(audioHex, "hex");
+      writeFileSync(filepath, buffer);
+      return `/api/media/tts/${hash}`;
+    } catch (err) {
+      console.error("[tts] MiniMax failed:", err);
+      return "";
+    }
+  }
+}
