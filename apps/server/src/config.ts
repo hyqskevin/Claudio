@@ -1,10 +1,17 @@
 export interface AppConfig {
   port: number;
   databaseUrl: string;
-  claude: {
-    apiKey: string;
-    baseUrl: string;
-    model: string;
+  /**
+   * LLM provider chain. Order matters: tried in sequence on each request,
+   * first successful response wins. Set apiKey to enable a provider.
+   *
+   * Currently supported:
+   * - "minimax": MiniMax M3 via Anthropic-compatible API at api.minimaxi.com
+   * - "kimi": Moonshot Kimi via OpenAI-compatible API at api.moonshot.cn
+   */
+  llm: {
+    minimax: { apiKey: string; baseUrl: string; model: string };
+    kimi: { apiKey: string; baseUrl: string; model: string };
   };
   ncm: {
     apiBaseUrl: string;
@@ -43,10 +50,17 @@ export function loadConfig(): AppConfig {
   return {
     port: Number(env("SERVER_PORT", "8080")),
     databaseUrl: env("DATABASE_URL", "file:./data/ai-radio.sqlite"),
-    claude: {
-      apiKey: env("CLAUDE_API_KEY"),
-      baseUrl: env("CLAUDE_BASE_URL", "https://api.anthropic.com"),
-      model: env("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+    llm: {
+      minimax: {
+        apiKey: env("MINIMAX_API_KEY"),
+        baseUrl: env("MINIMAX_BASE_URL", "https://api.minimaxi.com/anthropic"),
+        model: env("MINIMAX_MODEL", "MiniMax-M3"),
+      },
+      kimi: {
+        apiKey: env("KIMI_API_KEY"),
+        baseUrl: env("KIMI_BASE_URL", "https://api.moonshot.cn/v1"),
+        model: env("KIMI_MODEL", "moonshot-v1-8k"),
+      },
     },
     ncm: {
       apiBaseUrl: env("NCM_API_BASE_URL", "http://localhost:3000"),

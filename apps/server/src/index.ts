@@ -28,10 +28,17 @@ import { historyRoutes } from "./routes/history.js";
 import { preferencesRoutes } from "./routes/preferences.js";
 import { playbackStateRoutes } from "./routes/playback-state.js";
 import { MockNcmService, NeteaseNcmService } from "./services/ncm.service.js";
-import { MockClaudeService, ClaudeApiService } from "./services/claude.service.js";
+import {
+  MockLlmService,
+  AnthropicCompatLlmService,
+  KimiLlmService,
+  LlmRouter,
+  type LlmService,
+} from "./services/claude.service.js";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { warmupTts } from "./services/tts-warmup.js";
 import { MockTtsService, FishTtsService, MinimaxTtsService } from "./services/tts.service.js";
 import { MockWeatherService, OpenWeatherService, WttrInService } from "./services/weather.service.js";
 import { MockCalendarService, FeishuCalendarService } from "./services/calendar.service.js";
@@ -58,16 +65,49 @@ const ncmUid = getSetting("ncm_uid") ?? config.ncm.uid;
 const ncm = config.ncm.apiBaseUrl
   ? new NeteaseNcmService(config.ncm.apiBaseUrl, ncmCookie || undefined, ncmUid || undefined)
   : new MockNcmService();
-const claudeApiKey = getSetting("claude_api_key") ?? config.claude.apiKey;
-const claude = claudeApiKey
-  ? (() => {
-      const systemPrompt = readFileSync(join(__dirname, "prompts/plan-system.md"), "utf-8");
-      return new ClaudeApiService(
-        { apiKey: claudeApiKey, baseUrl: config.claude.baseUrl, model: config.claude.model },
-        systemPrompt
-      );
-    })()
-  : new MockClaudeService();
+// LLM provider chain: MiniMax (Anthropic-compat) → Kimi (OpenAI-compat) → Mock
+const systemPrompt = (() => {
+  try {
+    return readFileSync(join(__dirname, "prompts/plan-system.md"), "utf-8");
+  } catch {
+    return "";
+  }
+})();
+const llmProviders: LlmService[] = [];
+
+const minimaxApiKey = getSetting("minimax_api_key") ?? config.llm.minimax.apiKey;
+if (minimaxApiKey) {
+  llmProviders.push(
+    new AnthropicCompatLlmService(
+      {
+        apiKey: minimaxApiKey,
+        baseUrl: config.llm.minimax.baseUrl,
+        model: config.llm.minimax.model,
+      },
+      systemPrompt,
+      "minimax"
+    )
+  );
+}
+
+const kimiApiKey = getSetting("kimi_api_key") ?? config.llm.kimi.apiKey;
+if (kimiApiKey) {
+  llmProviders.push(
+    new KimiLlmService(
+      {
+        apiKey: kimiApiKey,
+        baseUrl: config.llm.kimi.baseUrl,
+        model: config.llm.kimi.model,
+      },
+      systemPrompt
+    )
+  );
+}
+
+if (llmProviders.length === 0) {
+  llmProviders.push(new MockLlmService());
+}
+const claude = new LlmRouter(llmProviders);
 const minimaxTtsKey = getSetting("minimax_api_key") ?? config.minimaxTts.apiKey;
 const fishApiKey = getSetting("fish_audio_api_key") ?? config.fishAudio.apiKey;
 const tts = minimaxTtsKey
@@ -80,6 +120,7 @@ const tts = minimaxTtsKey
   : fishApiKey
   ? new FishTtsService({ apiKey: fishApiKey, voiceId: config.fishAudio.voiceId })
   : new MockTtsService();
+const ttsProviderName = minimaxTtsKey ? "minimax" : fishApiKey ? "fish" : "mock";
 const weatherApiKey = getSetting("openweather_api_key") ?? config.openWeather.apiKey;
 const weather = weatherApiKey
   ? new OpenWeatherService({ apiKey: weatherApiKey, city: config.openWeather.city })
@@ -98,7 +139,7 @@ const context = new ContextService(weather, calendar, profile);
 const playlist = new PlaylistService();
 
 // 调度器需要 claude 和 context，所以在它们之后创建
-const scheduler = claudeApiKey
+const scheduler = llmProviders.length > 0 && llmProviders[0].providerName !== "mock"
   ? new CronSchedulerService({ claude, context })
   : new MockSchedulerService();
 
@@ -109,11 +150,11 @@ app.get("/api/health", async () => ({
   timestamp: new Date().toISOString(),
   services: {
     ncm: config.ncm.apiBaseUrl ? "connected" : "mock",
-    claude: claudeApiKey ? "connected" : "mock",
-    tts: minimaxTtsKey ? "minimax" : fishApiKey ? "fish" : "mock",
+    claude: claude.providerName,
+    tts: ttsProviderName,
     weather: weatherApiKey ? "connected" : "wttr.in",
     calendar: feishuAppId ? "connected" : "mock",
-    scheduler: claudeApiKey ? "cron" : "mock",
+    scheduler: scheduler.constructor.name,
   },
 }));
 
@@ -163,6 +204,12 @@ async function start() {
     await app.listen({ port: config.port, host: "0.0.0.0" });
     console.log(`[server] listening on http://localhost:${config.port}`);
     scheduler.start();
+
+    // TTS warmup: pre-synthesize common DJ phrases so first-time playback is instant
+    // Fire-and-forget so startup latency is not affected
+    void warmupTts(tts).catch((err) => {
+      console.error("[tts-warmup] background warmup crashed:", err);
+    });
   } catch (err) {
     app.log.error(err);
     process.exit(1);

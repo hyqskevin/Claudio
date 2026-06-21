@@ -61,7 +61,21 @@ export interface ClaudeService {
     ): Promise<ChatReply>;
 }
 
-export class MockClaudeService implements ClaudeService {
+/**
+ * Provider-agnostic LLM interface. Implemented by:
+ * - AnthropicCompatLlmService (MiniMax M3 — Anthropic protocol at api.minimaxi.com)
+ * - KimiLlmService (Moonshot Kimi — OpenAI protocol at api.moonshot.cn)
+ * - MockLlmService (in-process stub, no network)
+ * - LlmRouter (chains providers with automatic fallback)
+ */
+export interface LlmService extends ClaudeService {
+    /** Human-readable name for logging / health checks */
+    readonly providerName: string;
+}
+
+export class MockLlmService implements LlmService {
+    readonly providerName = "mock";
+
     async generatePlan(request: PlanRequest, _context: string): Promise<PlanResponse> {
         const songs = [
             { query: "轻音乐", reason: "适合当前放松场景" },
@@ -132,7 +146,8 @@ interface ClaudeRawResponse {
     memory?: Array<{ file: string; add: string }>;
 }
 
-export class ClaudeApiService implements ClaudeService {
+export class AnthropicCompatLlmService implements LlmService {
+    readonly providerName: string;
     private apiKey: string;
     private baseUrl: string;
     private model: string;
@@ -140,12 +155,17 @@ export class ClaudeApiService implements ClaudeService {
 
     private chatSystemPrompt: string;
 
-    constructor(config: { apiKey: string; baseUrl: string; model: string }, systemPrompt: string) {
+    constructor(
+        config: { apiKey: string; baseUrl: string; model: string },
+        systemPrompt: string,
+        providerName = "anthropic-compat"
+    ) {
         this.apiKey = config.apiKey;
         this.baseUrl = config.baseUrl;
         this.model = config.model;
         this.systemPrompt = systemPrompt;
         this.chatSystemPrompt = this.buildChatSystemPrompt();
+        this.providerName = providerName;
     }
 
     private buildChatSystemPrompt(): string {
@@ -198,13 +218,16 @@ export class ClaudeApiService implements ClaudeService {
                     console.log("[claude] Parsed JSON:", JSON.stringify(rawResponse).substring(0, 200));
                     break;
                 }
+                // Response received but no JSON — try one more time with stricter prompt
             } catch (err) {
-                console.error("[claude] Attempt", attempt, "failed:", err);
-                if (attempt === 1) break;
+                // Transport/auth error — propagate so LlmRouter can try next provider
+                throw err;
             }
         }
 
         if (!rawResponse) {
+            // Response was received but JSON couldn't be parsed — use local fallback
+            // (no point retrying another provider for the same prompt structure)
             return {
                 summary: "AI 生成失败，使用默认计划",
                 scene: request.scene ?? "default",
@@ -218,6 +241,7 @@ export class ClaudeApiService implements ClaudeService {
     /**
      * Streaming version: calls Claude API with stream=true, forwards text chunks
      * via onChunk callback in real-time, then parses the final JSON plan.
+     * Errors propagate to LlmRouter — no internal sync fallback (would mask failures).
      */
     async generatePlanStream(
         request: PlanRequest,
@@ -225,14 +249,7 @@ export class ClaudeApiService implements ClaudeService {
         onChunk: (text: string) => void
     ): Promise<PlanResponse> {
         const userMessage = this.buildUserMessage(request, context);
-        let fullText = "";
-
-        try {
-            fullText = await this.callClaudeStream(userMessage, onChunk);
-        } catch (err) {
-            console.error("[claude-stream] Streaming failed, falling back to sync:", err);
-            return this.generatePlan(request, context);
-        }
+        const fullText = await this.callClaudeStream(userMessage, onChunk);
 
         // Parse the JSON plan from the accumulated text
         const rawResponse = this.extractJson(fullText);
@@ -585,5 +602,380 @@ export class ClaudeApiService implements ClaudeService {
         }
 
         return null;
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Shared plan helpers — used by AnthropicCompatLlmService and KimiLlmService
+// (both wrap different protocols but need to parse the same plan JSON shape)
+// ────────────────────────────────────────────────────────────────────
+
+function buildPlanUserMessage(request: PlanRequest, context: string): string {
+    const parts = [context];
+    if (request.input) parts.push(`用户输入：${request.input}`);
+    if (request.scene) parts.push(`当前场景：${request.scene}`);
+    parts.push(`需要歌曲数量：${request.maxSongs ?? 8}`);
+    parts.push(`是否需要 DJ 串词：${request.withDj ? "是" : "否"}`);
+    return parts.join("\n\n");
+}
+
+function extractJson(text: string): ClaudeRawResponse | null {
+    try {
+        return JSON.parse(text) as ClaudeRawResponse;
+    } catch {}
+
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match?.[1]) {
+        try {
+            return JSON.parse(match[1].trim()) as ClaudeRawResponse;
+        } catch {}
+    }
+
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+        try {
+            return JSON.parse(text.slice(start, end + 1)) as ClaudeRawResponse;
+        } catch {}
+    }
+
+    return null;
+}
+
+function transformResponse(raw: ClaudeRawResponse, request: PlanRequest): PlanResponse {
+    const items: PlanItem[] = [];
+
+    if (request.withDj && raw.djLines) {
+        for (const line of raw.djLines) {
+            items.push({
+                type: "tts",
+                text: line.text,
+            });
+        }
+    }
+
+    if (raw.songs) {
+        for (const song of raw.songs.slice(0, request.maxSongs ?? 8)) {
+            items.push({
+                type: "song",
+                query: song.query,
+                reason: song.reason,
+            });
+        }
+    }
+
+    return {
+        summary: raw.summary ?? "已生成播放计划",
+        scene: raw.scene ?? request.scene ?? "default",
+        items,
+        segue: raw.segue,
+        memory: raw.memory,
+    };
+}
+
+function fallbackPlanItems(request: PlanRequest): PlanItem[] {
+    const items: PlanItem[] = [];
+    if (request.withDj) {
+        items.push({ type: "tts", text: "欢迎收听 AI 电台" });
+    }
+    items.push({ type: "song", query: "轻音乐", reason: "默认推荐" });
+    items.push({ type: "song", query: "钢琴曲", reason: "默认推荐" });
+    return items;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// KimiLlmService — Moonshot Kimi via OpenAI-compatible protocol
+// API: POST {baseUrl}/chat/completions with Authorization: Bearer header
+// Response: { choices: [{ message: { content: "..." } }] }
+// Streaming: SSE chunks of { choices: [{ delta: { content: "..." } }] }
+// ────────────────────────────────────────────────────────────────────
+
+export class KimiLlmService implements LlmService {
+    readonly providerName = "kimi";
+    private apiKey: string;
+    private baseUrl: string;
+    private model: string;
+    private systemPrompt: string;
+
+    constructor(
+        config: { apiKey: string; baseUrl: string; model: string },
+        systemPrompt: string
+    ) {
+        this.apiKey = config.apiKey;
+        this.baseUrl = config.baseUrl.replace(/\/+$/, "");
+        this.model = config.model;
+        this.systemPrompt = systemPrompt;
+    }
+
+    async generatePlan(request: PlanRequest, context: string): Promise<PlanResponse> {
+        const userMessage = buildPlanUserMessage(request, context);
+        let rawResponse: ClaudeRawResponse | null = null;
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const response = await this.callKimi(
+                    attempt === 0
+                        ? userMessage
+                        : `${userMessage}\n\n请只返回 JSON，不要添加任何其他文字。`
+                );
+                console.log(`[kimi] Raw response: ${response.substring(0, 200)}`);
+                rawResponse = extractJson(response);
+                if (rawResponse) {
+                    console.log(`[kimi] Parsed JSON: ${JSON.stringify(rawResponse).substring(0, 200)}`);
+                    break;
+                }
+                // Got response but unparseable — retry once with stricter prompt
+            } catch (err) {
+                // Transport/auth error — propagate to LlmRouter for next provider
+                throw err;
+            }
+        }
+
+        if (!rawResponse) {
+            return {
+                summary: "AI 生成失败，使用默认计划",
+                scene: request.scene ?? "default",
+                items: fallbackPlanItems(request),
+            };
+        }
+
+        return transformResponse(rawResponse, request);
+    }
+
+    async generatePlanStream(
+        request: PlanRequest,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<PlanResponse> {
+        const userMessage = buildPlanUserMessage(request, context);
+        // Stream errors propagate to LlmRouter — don't fall back to sync inside this provider
+        const fullText = await this.callKimiStream(userMessage, onChunk);
+
+        const rawResponse = extractJson(fullText);
+        if (!rawResponse) {
+            return {
+                summary: fullText || "已为你生成播放计划",
+                scene: request.scene ?? "default",
+                items: fallbackPlanItems(request),
+            };
+        }
+        return transformResponse(rawResponse, request);
+    }
+
+    async generateChatReplyStream(
+        message: string,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<ChatReply> {
+        const systemPrompt = `${this.systemPrompt}\n\n你是友好的电台 DJ，使用 JSON 格式回复：{"say": "...", "play": [{"name":"...","artist":"...","reason":"..."}], "segue": "..."}`;
+        const userMessage = context ? `${context}\n\n用户说：${message}` : message;
+        const fullText = await this.callKimiStream(userMessage, onChunk, systemPrompt);
+        const parsed = this.extractChatReply(fullText);
+        return parsed ?? { say: fullText || "好的，收到~" };
+    }
+
+    private async callKimi(userMessage: string): Promise<string> {
+        const url = `${this.baseUrl}/chat/completions`;
+        const body = JSON.stringify({
+            model: this.model,
+            max_tokens: 4096,
+            messages: [
+                { role: "system", content: this.systemPrompt },
+                { role: "user", content: userMessage },
+            ],
+        });
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.apiKey}`,
+            },
+            body,
+            signal: AbortSignal.timeout(65000),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Kimi API ${response.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const data = (await response.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+        };
+        return data.choices?.[0]?.message?.content ?? "";
+    }
+
+    private async callKimiStream(
+        userMessage: string,
+        onChunk: (text: string) => void,
+        overrideSystemPrompt?: string
+    ): Promise<string> {
+        const url = `${this.baseUrl}/chat/completions`;
+        const body = JSON.stringify({
+            model: this.model,
+            max_tokens: 4096,
+            stream: true,
+            messages: [
+                { role: "system", content: overrideSystemPrompt ?? this.systemPrompt },
+                { role: "user", content: userMessage },
+            ],
+        });
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${this.apiKey}`,
+            },
+            body,
+            signal: AbortSignal.timeout(120000),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Kimi API ${response.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() ?? "";
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith("data:")) continue;
+                const data = trimmed.slice(5).trim();
+                if (data === "[DONE]") continue;
+                try {
+                    const event = JSON.parse(data);
+                    const delta = event.choices?.[0]?.delta?.content;
+                    if (delta) {
+                        fullText += delta;
+                        onChunk(delta);
+                    }
+                } catch {
+                    // skip malformed lines
+                }
+            }
+        }
+
+        return fullText;
+    }
+
+    private extractChatReply(text: string): ChatReply | null {
+        try {
+            const obj = JSON.parse(text) as ChatReply;
+            if (obj.say) return obj;
+        } catch {}
+        const match = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (match?.[1]) {
+            try {
+                const obj = JSON.parse(match[1].trim()) as ChatReply;
+                if (obj.say) return obj;
+            } catch {}
+        }
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+            try {
+                const obj = JSON.parse(text.slice(start, end + 1)) as ChatReply;
+                if (obj.say) return obj;
+            } catch {}
+        }
+        return null;
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// LlmRouter — chains providers with automatic fallback
+// Order: try providers sequentially; on error, advance to next.
+// Streaming variants: try first provider with stream; on stream error,
+// fall back to non-stream (which itself tries providers).
+// ────────────────────────────────────────────────────────────────────
+
+export class LlmRouter implements LlmService {
+    readonly providerName: string;
+    private providers: LlmService[];
+
+    constructor(providers: LlmService[]) {
+        this.providers = providers.filter((p) => p.providerName !== "mock");
+        if (this.providers.length === 0 && providers.length > 0) {
+            // All providers were mock — keep the mock so we don't have an empty chain
+            this.providers = providers;
+        }
+        this.providerName = `router:${this.providers.map((p) => p.providerName).join("→")}`;
+    }
+
+    async generatePlan(request: PlanRequest, context: string): Promise<PlanResponse> {
+        const errors: Array<{ provider: string; error: string }> = [];
+        for (const p of this.providers) {
+            try {
+                console.log(`[llm-router] Trying provider: ${p.providerName}`);
+                const result = await p.generatePlan(request, context);
+                if (result && result.items && result.items.length > 0) {
+                    return result;
+                }
+                console.warn(`[llm-router] ${p.providerName} returned empty plan, trying next`);
+                errors.push({ provider: p.providerName, error: "empty plan" });
+            } catch (err) {
+                console.error(`[llm-router] ${p.providerName} failed:`, err);
+                errors.push({
+                    provider: p.providerName,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+        // All providers exhausted — return degraded plan with default items + error summary
+        console.error(`[llm-router] All providers failed:`, errors);
+        return {
+            summary: `LLM 不可用（${errors.map((e) => e.provider).join(", ")}）`,
+            scene: request.scene ?? "default",
+            items: fallbackPlanItems(request),
+        };
+    }
+
+    async generatePlanStream(
+        request: PlanRequest,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<PlanResponse> {
+        for (const p of this.providers) {
+            try {
+                console.log(`[llm-router] Stream: trying ${p.providerName}`);
+                return await p.generatePlanStream(request, context, onChunk);
+            } catch (err) {
+                console.error(`[llm-router] ${p.providerName} stream failed, trying next:`, err);
+            }
+        }
+        // Last resort: sync fallback through router
+        console.warn("[llm-router] All streaming failed, falling back to sync");
+        return this.generatePlan(request, context);
+    }
+
+    async generateChatReplyStream(
+        message: string,
+        context: string,
+        onChunk: (text: string) => void
+    ): Promise<ChatReply> {
+        for (const p of this.providers) {
+            try {
+                return await p.generateChatReplyStream(message, context, onChunk);
+            } catch (err) {
+                console.error(`[llm-router] ${p.providerName} chat failed, trying next:`, err);
+            }
+        }
+        onChunk("抱歉，暂时无法回应，请稍后再试。");
+        return { say: "抱歉，暂时无法回应，请稍后再试。" };
     }
 }
