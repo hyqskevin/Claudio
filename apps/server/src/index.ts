@@ -141,7 +141,7 @@ const playlist = new PlaylistService();
 // 调度器需要 claude 和 context，所以在它们之后创建
 const llmIsReal = llmProviders.length > 0 && llmProviders[0].providerName !== "mock";
 const scheduler = llmIsReal
-  ? new CronSchedulerService({ claude, context })
+  ? new CronSchedulerService({ claude, context, ncm, tts })
   : new MockSchedulerService();
 
 app.decorate("services", { ncm, claude, tts, weather, calendar, upnp, scheduler, context, playlist, profile });
