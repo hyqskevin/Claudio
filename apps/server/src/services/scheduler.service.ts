@@ -3,9 +3,13 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClaudeService } from "./claude.service.js";
 import type { ContextService } from "./context.service.js";
+import type { NcmService } from "./ncm.service.js";
+import type { TtsService } from "./tts.service.js";
 import { setSetting, getSetting } from "../db/settings.repo.js";
 import { getRecentPlays, getFavorites } from "../db/plays.repo.js";
 import { getRecentMessages } from "../db/messages.repo.js";
+import { insertPlanItems } from "../db/queue.repo.js";
+import { enrichPlanItems } from "../helpers/plan-enrich.js";
 
 export type TaskName = "morning-plan" | "weather-refresh" | "cache-check" | "history-consolidate" | "daily-playlist" | "mood-check" | "taste-profile";
 
@@ -48,11 +52,15 @@ export class CronSchedulerService implements SchedulerService {
   private tasks: ScheduledTask[] = [];
   private claude: ClaudeService;
   private context: ContextService;
+  private ncm: NcmService;
+  private tts: TtsService;
   private statuses: Map<TaskName, TaskStatus> = new Map();
 
-  constructor(deps: { claude: ClaudeService; context: ContextService }) {
+  constructor(deps: { claude: ClaudeService; context: ContextService; ncm: NcmService; tts: TtsService }) {
     this.claude = deps.claude;
     this.context = deps.context;
+    this.ncm = deps.ncm;
+    this.tts = deps.tts;
   }
 
   private recordResult(name: TaskName, cron: string, ok: boolean, error?: string) {
@@ -103,7 +111,17 @@ export class CronSchedulerService implements SchedulerService {
         { trigger: "scheduled", maxSongs: 8, withDj: true, scene: "morning" },
         contextStr
       );
-      console.log(`[scheduler] morning plan generated: ${plan.summary}`);
+
+      // Pre-generate queue: enrich items (NCM lookup + TTS) and append to queue
+      // Don't clear existing queue — user may be listening; pre-gen items just wait
+      const planId = `sched_morning_${Date.now().toString(36)}`;
+      const enriched = await enrichPlanItems(this.ncm, this.tts, plan.items, planId);
+      insertPlanItems(planId, enriched);
+
+      console.log(
+        `[scheduler] morning plan generated: ${plan.summary} (${enriched.length} items queued)`
+      );
+      setSetting("morning_plan_summary", plan.summary);
       this.recordResult("morning-plan", cron, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -181,7 +199,16 @@ export class CronSchedulerService implements SchedulerService {
         contextStr
       );
       setSetting("daily_playlist", JSON.stringify(plan));
-      console.log("[scheduler] daily playlist generated");
+
+      // Pre-generate queue: enrich items (NCM lookup only, no DJ TTS) and append
+      // Don't clear existing queue — user may be listening; pre-gen items just wait
+      const planId = `sched_daily_${Date.now().toString(36)}`;
+      const enriched = await enrichPlanItems(this.ncm, this.tts, plan.items, planId);
+      insertPlanItems(planId, enriched);
+
+      console.log(
+        `[scheduler] daily playlist generated: ${plan.summary} (${enriched.length} items queued)`
+      );
       this.recordResult("daily-playlist", cron, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
