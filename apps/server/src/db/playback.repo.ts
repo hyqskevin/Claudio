@@ -10,6 +10,7 @@ export interface PlaybackState {
     queueData: string | null;
     queueIndex: number;
     playMode: string;
+    shuffle: boolean;
 }
 
 interface PlaybackRow {
@@ -22,6 +23,7 @@ interface PlaybackRow {
     queue_data: string | null;
     queue_index: number;
     play_mode: string;
+    shuffle: number;
 }
 
 export function getPlaybackState(): PlaybackState {
@@ -29,7 +31,7 @@ export function getPlaybackState(): PlaybackState {
         .prepare(
             `SELECT current_song_id, current_song_name, current_song_artist,
                     current_song_album, current_song_cover, progress_seconds,
-                    queue_data, queue_index, play_mode
+                    queue_data, queue_index, play_mode, shuffle
              FROM playback_state WHERE id = 1`
         )
         .get() as PlaybackRow | undefined;
@@ -45,6 +47,7 @@ export function getPlaybackState(): PlaybackState {
             queueData: null,
             queueIndex: 0,
             playMode: "off",
+            shuffle: false,
         };
     }
 
@@ -58,6 +61,7 @@ export function getPlaybackState(): PlaybackState {
         queueData: row.queue_data,
         queueIndex: row.queue_index,
         playMode: row.play_mode,
+        shuffle: Boolean(row.shuffle),
     };
 }
 
@@ -77,6 +81,7 @@ export function updatePlaybackState(state: Partial<PlaybackState>): void {
                 queue_data = ?,
                 queue_index = ?,
                 play_mode = ?,
+                shuffle = ?,
                 updated_at = CURRENT_TIMESTAMP
              WHERE id = 1`
         )
@@ -89,6 +94,7 @@ export function updatePlaybackState(state: Partial<PlaybackState>): void {
             merged.progressSeconds,
             merged.queueData,
             merged.queueIndex,
-            merged.playMode
+            merged.playMode,
+            merged.shuffle ? 1 : 0
         );
 }
