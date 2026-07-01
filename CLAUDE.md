@@ -10,10 +10,12 @@
 - WebSocket for real-time updates (now_playing, queue, DJ messages)
 
 ## Key Commands
-- `./start.sh` — **一键启动**（自动关闭旧进程 → NCM :3000 → 后端 :8080 → 前端 :5173，Ctrl+C 全部停止）
+- `./start.sh` — **一键启动**（自动关闭旧进程 → NCM :3000 → 后端 :8080 → 前端 :5173，Ctrl+C 全部停止；会 kill 占用这些端口的任意进程）
 - `pnpm dev` — start both server (:8080) and web (:5173) concurrently (不启动 NCM，不清理旧进程)
 - `pnpm --filter @ai-radio/server build` — build server
 - `pnpm --filter @ai-radio/web build` — build web (outputs to apps/web/dist)
+- `pnpm typecheck` — current repo-wide static check
+- `pnpm build` — current repo-wide production build check
 - `cd apps/server && pnpm dev` — server only (tsx watch src/index.ts)
 - `cd apps/web && pnpm dev` — web only (Vite dev server)
 
@@ -54,9 +56,17 @@
 - Profile page with real play stats (top artists, minutes listened, favorites)
 
 ## Known Gaps (to fix)
-- /api/now and /api/player use mock queue (Task 1 in progress)
-- WebSocket events not fully wired (Task 2 in progress)
-- Scheduler cron `daily-playlist`/`morning-plan` generate plans but don't insert into queue table
+- See `docs/project-assessment.md` for the full software assessment and remediation order.
+- P0: remove committed Netease cookie from `apps/server/ncm-server.mjs`, rotate that session, and load NCM auth only from local config.
+- P0: settings masking misses current key names (`minimax_api_key`, `kimi_api_key`, `ncm_cookie`). The frontend keeps masked values (`***已配置***`) in state and can overwrite real secrets with the mask sentinel on any save.
+- P0: `/api/cover` accepts arbitrary URLs and can forward cookies; restrict hosts and block private-network SSRF.
+- P1: `/api/now`, `/api/queue`, player routes, and WebSocket events must share one camelCase `QueueItem` serializer; current raw DB rows (snake_case) can break frontend playback, lyrics, favorites, and covers.
+- P1: chat command responses can report success without controlling the browser-local AudioPlayer.
+- P1: playback state uses inconsistent `playMode` / `play_mode`; shuffle persistence is claimed but not represented in the DB schema.
+- P2: `DATABASE_URL` is documented but ignored by `getDb()`.
+- P2: `SERVER_PORT` and dispatch's internal `PORT` self-calls are inconsistent.
+- P2: Scheduler cron `daily-playlist`/`morning-plan` generate plans but don't insert into queue table.
 - LLM feedback loop: user favorites/dislikes aren't weighted in prompts (memory writer writes to user/*.md but no re-injection)
 - No drag-to-reorder queue
 - No UPnP casting
+- No runnable `pnpm test` setup yet; current verification is `pnpm typecheck` and `pnpm build`. Contract tests for queue serialization, settings masking, and cover proxy validation should be added first.
