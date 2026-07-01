@@ -3,7 +3,8 @@ import { broadcast } from "./stream.js";
 import { getCurrentState } from "./now.js";
 import {
   getCurrentItem,
-  getQueueItems,
+  getQueueItemsWithMeta,
+  serializeQueueItem,
   setCurrentPlaying,
   skipToNext,
   skipToPrevious,
@@ -53,7 +54,7 @@ export async function playerRoutes(app: FastifyInstance) {
 
     const state = getCurrentState();
     broadcast("now_changed", state);
-    broadcast("queue_updated", getQueueItems());
+    broadcast("queue_updated", { items: getQueueItemsWithMeta().map(serializeQueueItem) });
     return { ok: true, message: "已切换到下一首", next: next ?? null };
   });
 
@@ -61,7 +62,7 @@ export async function playerRoutes(app: FastifyInstance) {
     const prev = skipToPrevious();
     const state = getCurrentState();
     broadcast("now_changed", state);
-    broadcast("queue_updated", getQueueItems());
+    broadcast("queue_updated", { items: getQueueItemsWithMeta().map(serializeQueueItem) });
     return { ok: true, message: "已切换到上一首", previous: prev ?? null };
   });
 

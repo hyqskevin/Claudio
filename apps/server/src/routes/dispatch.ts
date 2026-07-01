@@ -20,7 +20,7 @@ const COMMAND_PATTERNS: Array<{ pattern: RegExp; action: string; reply: string }
   { pattern: /循环|单曲循环|repeat/i, action: "repeat", reply: "循环播放模式已开启" },
 ];
 
-function detectCommand(text: string): DispatchCommand | null {
+export function detectCommand(text: string): DispatchCommand | null {
   const trimmed = text.trim();
   for (const { pattern, action, reply } of COMMAND_PATTERNS) {
     if (pattern.test(trimmed)) {
@@ -30,7 +30,7 @@ function detectCommand(text: string): DispatchCommand | null {
   return null;
 }
 
-function detectSearch(text: string): string | null {
+export function detectSearch(text: string): string | null {
   // "推荐" messages should go to AI chat, not search
   if (/推荐/.test(text)) return null;
   const match = text.match(/^(?:搜索|播放|找|来一首?|听)\s*(.+)/);
@@ -70,14 +70,15 @@ export async function dispatchRoutes(app: FastifyInstance) {
     if (cmd) {
       const { action } = cmd;
       try {
+        const serverPort = process.env.SERVER_PORT ?? "8080";
         if (action === "next") {
-          await fetch(`http://localhost:${process.env.PORT ?? 8080}/api/player/next`, { method: "POST" });
+          await fetch(`http://localhost:${serverPort}/api/player/next`, { method: "POST" });
         } else if (action === "prev") {
-          await fetch(`http://localhost:${process.env.PORT ?? 8080}/api/player/previous`, { method: "POST" });
+          await fetch(`http://localhost:${serverPort}/api/player/previous`, { method: "POST" });
         } else if (action === "pause") {
-          await fetch(`http://localhost:${process.env.PORT ?? 8080}/api/player/pause`, { method: "POST" });
+          await fetch(`http://localhost:${serverPort}/api/player/pause`, { method: "POST" });
         } else if (action === "play") {
-          await fetch(`http://localhost:${process.env.PORT ?? 8080}/api/player/play`, { method: "POST" });
+          await fetch(`http://localhost:${serverPort}/api/player/play`, { method: "POST" });
         }
       } catch (err) {
         console.error("[dispatch] player command failed:", err);

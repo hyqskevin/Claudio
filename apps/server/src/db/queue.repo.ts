@@ -5,11 +5,44 @@ export interface QueueItemRow {
   plan_id: string | null;
   type: string;
   song_id: string | null;
+  title: string | null;
+  artist: string | null;
+  cover_url: string | null;
   tts_text: string | null;
   audio_url: string | null;
   reason: string | null;
   sort_order: number;
   status: string;
+}
+
+export interface QueueItemWithMeta {
+  id: string;
+  plan_id: string | null;
+  type: string;
+  song_id: string | null;
+  title: string | null;
+  artist: string | null;
+  cover_url: string | null;
+  tts_text: string | null;
+  audio_url: string | null;
+  reason: string | null;
+  sort_order: number;
+  status: string;
+}
+
+export function serializeQueueItem(row: QueueItemWithMeta) {
+  return {
+    id: row.id,
+    type: row.type as "song" | "tts",
+    songId: row.song_id ?? undefined,
+    title: row.title ?? undefined,
+    artist: row.artist ?? undefined,
+    coverUrl: row.cover_url ?? undefined,
+    audioUrl: row.audio_url ?? undefined,
+    text: row.tts_text ?? undefined,
+    reason: row.reason ?? undefined,
+    status: row.status as "pending" | "playing" | "played" | "skipped" | "failed",
+  };
 }
 
 export function getQueueItems(): QueueItemRow[] {
@@ -18,10 +51,42 @@ export function getQueueItems(): QueueItemRow[] {
     .all() as QueueItemRow[];
 }
 
+export function getQueueItemsWithMeta(): QueueItemWithMeta[] {
+  return getDb()
+    .prepare(
+      `SELECT q.id, q.plan_id, q.type, q.song_id,
+              COALESCE(q.title, s.title) AS title,
+              COALESCE(q.artist, s.artist) AS artist,
+              COALESCE(q.cover_url, s.cover_url) AS cover_url,
+              q.tts_text, q.audio_url, q.reason, q.sort_order, q.status
+       FROM queue_items q
+       LEFT JOIN songs s ON q.song_id = s.id
+       ORDER BY q.sort_order ASC`
+    )
+    .all() as QueueItemWithMeta[];
+}
+
 export function getCurrentItem(): QueueItemRow | undefined {
   return getDb()
     .prepare("SELECT * FROM queue_items WHERE status = 'playing' ORDER BY sort_order ASC LIMIT 1")
     .get() as QueueItemRow | undefined;
+}
+
+export function getCurrentItemWithMeta(): QueueItemWithMeta | undefined {
+  return getDb()
+    .prepare(
+      `SELECT q.id, q.plan_id, q.type, q.song_id,
+              COALESCE(q.title, s.title) AS title,
+              COALESCE(q.artist, s.artist) AS artist,
+              COALESCE(q.cover_url, s.cover_url) AS cover_url,
+              q.tts_text, q.audio_url, q.reason, q.sort_order, q.status
+       FROM queue_items q
+       LEFT JOIN songs s ON q.song_id = s.id
+       WHERE q.status = 'playing'
+       ORDER BY q.sort_order ASC
+       LIMIT 1`
+    )
+    .get() as QueueItemWithMeta | undefined;
 }
 
 export function setCurrentPlaying(itemId: string): void {
@@ -37,6 +102,9 @@ export function addToQueue(item: {
   id: string;
   type: string;
   songId?: string;
+  title?: string;
+  artist?: string;
+  coverUrl?: string;
   text?: string;
   audioUrl?: string;
   reason?: string;
@@ -47,13 +115,16 @@ export function addToQueue(item: {
     .get() as { next_order: number };
   getDb()
     .prepare(
-      "INSERT INTO queue_items (id, plan_id, type, song_id, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
+      "INSERT INTO queue_items (id, plan_id, type, song_id, title, artist, cover_url, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
     )
     .run(
       item.id,
       item.planId ?? null,
       item.type,
       item.songId ?? null,
+      item.title ?? null,
+      item.artist ?? null,
+      item.coverUrl ?? null,
       item.text ?? null,
       item.audioUrl ?? null,
       item.reason ?? null,
@@ -123,6 +194,9 @@ export function insertPlanItems(
     id: string;
     type: string;
     songId?: string;
+    title?: string;
+    artist?: string;
+    coverUrl?: string;
     text?: string;
     audioUrl?: string;
     reason?: string;
@@ -130,7 +204,7 @@ export function insertPlanItems(
 ): void {
   const db = getDb();
   const insertStmt = db.prepare(
-    "INSERT INTO queue_items (id, plan_id, type, song_id, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
+    "INSERT INTO queue_items (id, plan_id, type, song_id, title, artist, cover_url, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
   );
 
   const baseOrder = (
@@ -147,6 +221,9 @@ export function insertPlanItems(
         planId,
         item.type,
         item.songId ?? null,
+        item.title ?? null,
+        item.artist ?? null,
+        item.coverUrl ?? null,
         item.text ?? null,
         item.audioUrl ?? null,
         item.reason ?? null,
@@ -161,6 +238,9 @@ export function replaceQueue(items: Array<{
   id: string;
   type: string;
   songId?: string;
+  title?: string;
+  artist?: string;
+  coverUrl?: string;
   text?: string;
   audioUrl?: string;
   reason?: string;
@@ -169,7 +249,7 @@ export function replaceQueue(items: Array<{
   const db = getDb();
   const deleteStmt = db.prepare("DELETE FROM queue_items");
   const insertStmt = db.prepare(
-    "INSERT INTO queue_items (id, type, song_id, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO queue_items (id, type, song_id, title, artist, cover_url, tts_text, audio_url, reason, sort_order, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
 
   const txn = db.transaction(() => {
@@ -180,6 +260,9 @@ export function replaceQueue(items: Array<{
         item.id,
         item.type,
         item.songId ?? null,
+        item.title ?? null,
+        item.artist ?? null,
+        item.coverUrl ?? null,
         item.text ?? null,
         item.audioUrl ?? null,
         item.reason ?? null,

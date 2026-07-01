@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { getQueueItems, replaceQueue } from "../db/queue.repo.js";
+import { getQueueItemsWithMeta, replaceQueue, serializeQueueItem } from "../db/queue.repo.js";
 
 const QueueItemSchema = z.object({
   id: z.string(),
@@ -17,20 +17,8 @@ const QueueItemSchema = z.object({
 
 export async function queueRoutes(app: FastifyInstance) {
   app.get("/api/queue", async () => {
-    const rows = getQueueItems();
-    const items = rows.map((r) => ({
-      id: r.id,
-      type: r.type,
-      songId: r.song_id ?? undefined,
-      title: undefined,
-      artist: undefined,
-      coverUrl: undefined,
-      audioUrl: r.audio_url ?? undefined,
-      text: r.tts_text ?? undefined,
-      reason: r.reason ?? undefined,
-      status: r.status,
-    }));
-    return { items };
+    const rows = getQueueItemsWithMeta();
+    return { items: rows.map(serializeQueueItem) };
   });
 
   app.put("/api/queue", async (request) => {

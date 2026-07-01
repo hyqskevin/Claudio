@@ -2,6 +2,9 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { config } from "dotenv";
+
+config({ path: new URL("../.env", import.meta.url) });
 
 const execFileAsync = promisify(execFile);
 
@@ -22,9 +25,50 @@ const BASE = "https://music.163.com";
 const AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 // NCM Cookie - MUSIC_U is the key authentication token
-const NCM_COOKIE = "MUSIC_U=00BCA05A82A64AD7DF7ABDE0B4EE5394A6B853EE51BF3D18C8A67D476064476BCBC19CC22258989B6DC1CF5A0EB4D10F36B49666CB93ABB7E4ED2A3033F035F1530D465304F52116ECF678C23F30FC469CDD1042928D7743F18C6F8EF49533AD64A946D84D72A2AF2A6EB5CD32BD952A650035CD44791D14CB94E69512831E46B38534F0216413F4629BF268BD9765EA98AB4686989FA06DAC1F035323820B65E2858286986866541DF5D582B52133C38CA3DF80D8BACF2C0550F410818641207D9FA6966505D9103106FF05C8D6E0DA236D2F4341F40544EAA4FB0F1D2447F2C2E7F6552314EA4C9BA173F591F296DA3F0397E509FE93F1B924502D9AFB11678D7BEB7608F38C8DEB9FFB597A8F55A8208FAC4398FFD9D8564080815746D50B6AB0BA179F4588AB2A103E83794963535F7F28FFD4F8BF2C4E1BD08D018B205958ACB1CF61E12AA2DBE133F066DE63CC7CA57B07A7D8E5EADDE8228D5AD2EE6B5955F096C3D0C27C7D1C1FE07F5E4E50F8687FD4C32DB9CD015D819E2D9F79CED1F94DBBD6318B6EB50CE3C5C90C0DFF4AEAF1C16F07CD529B87C3E89002CB1AA4; __csrf=975ec176bf8aad605fab5433d08aa6a3";
+const NCM_COOKIE = process.env.NCM_COOKIE || process.env.NETEASE_COOKIE || "";
+if (!NCM_COOKIE) {
+  console.warn("[ncm] NCM_COOKIE / NETEASE_COOKIE not set. Authenticated endpoints (user playlists, daily recommendations) will be unavailable.");
+}
 
-// weapi encryption
+// SSRF-safe cover proxy whitelist
+const ALLOWED_COVER_HOSTS = [
+  "p1.music.126.net",
+  "p2.music.126.net",
+  "p3.music.126.net",
+  "p4.music.126.net",
+  "p1.music.126.com",
+  "p2.music.126.com",
+  "p3.music.126.com",
+  "p4.music.126.com",
+];
+const PRIVATE_IP_RANGES = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^0\./,
+  /^::1$/,
+  /^fc00:/i,
+  /^fe80:/i,
+];
+
+function isPrivateIp(hostname) {
+  return PRIVATE_IP_RANGES.some((re) => re.test(hostname));
+}
+
+function isAllowedCoverUrl(urlString) {
+  let parsed;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (isPrivateIp(parsed.hostname)) return false;
+  if (parsed.hostname === "169.254.169.254") return false; // metadata service
+  return ALLOWED_COVER_HOSTS.includes(parsed.hostname.toLowerCase());
+}
 const SECRET_KEY = "0CoJUm6Qyw8W8jud";
 const IV = "0102030405060708";
 const PUBKEY = "010001";
@@ -68,14 +112,18 @@ async function ncmPost(path, body) {
   const { params, encSecKey } = weapiEncrypt(JSON.stringify(body));
   const form = `params=${encodeURIComponent(params)}&encSecKey=${encodeURIComponent(encSecKey)}`;
 
+  const headers = {
+    "User-Agent": AGENT,
+    Referer: "https://music.163.com/",
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  if (NCM_COOKIE) {
+    headers.Cookie = NCM_COOKIE;
+  }
+
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: {
-      "User-Agent": AGENT,
-      Referer: "https://music.163.com/",
-      "Content-Type": "application/x-www-form-urlencoded",
-      Cookie: NCM_COOKIE,
-    },
+    headers,
     body: form,
   });
   return res.json();
@@ -85,9 +133,12 @@ async function ncmGet(path, params = {}) {
   const url = new URL(path, BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-  const res = await fetch(url.toString(), {
-    headers: { "User-Agent": AGENT, Referer: "https://music.163.com/", Cookie: NCM_COOKIE },
-  });
+  const headers = { "User-Agent": AGENT, Referer: "https://music.163.com/" };
+  if (NCM_COOKIE) {
+    headers.Cookie = NCM_COOKIE;
+  }
+
+  const res = await fetch(url.toString(), { headers });
   return res.json();
 }
 
@@ -198,6 +249,11 @@ const server = http.createServer(async (req, res) => {
       const data = await ncmPost("/weapi/v6/playlist/detail", { id, n: 100000, s: 8 });
       res.end(JSON.stringify({ playlist: { tracks: (data?.playlist?.tracks ?? []).map(mapSong) } }));
     } else if (url.pathname === "/user/playlist") {
+      if (!NCM_COOKIE) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: "NCM_COOKIE not configured. Login required for user playlists." }));
+        return;
+      }
       const uid = url.searchParams.get("uid") ?? "";
       const limit = Number(url.searchParams.get("limit") ?? "50");
       try {
@@ -231,6 +287,11 @@ const server = http.createServer(async (req, res) => {
       const songs = (data?.songs ?? []).map(mapSong);
       res.end(JSON.stringify({ songs }));
     } else if (url.pathname === "/recommend/songs") {
+      if (!NCM_COOKIE) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: "NCM_COOKIE not configured. Login required for daily recommendations." }));
+        return;
+      }
       const data = await ncmPost("/weapi/v3/playlist/detail", { id: "3778678", n: 100000, s: 8 });
       res.end(JSON.stringify({ data: { dailySongs: (data?.playlist?.tracks ?? []).slice(0, 30).map(mapSong) } }));
     } else if (url.pathname === "/audio") {
@@ -289,8 +350,10 @@ const server = http.createServer(async (req, res) => {
         : {
             "User-Agent": AGENT,
             Referer: "https://music.163.com/",
-            Cookie: NCM_COOKIE,
           };
+      if (!isYoutube && NCM_COOKIE) {
+        fetchHeaders.Cookie = NCM_COOKIE;
+      }
 
       // Fetch audio from CDN with proper headers
       let audioRes = await fetch(audioUrl, { headers: fetchHeaders });
@@ -343,9 +406,9 @@ const server = http.createServer(async (req, res) => {
     } else if (url.pathname === "/cover") {
       // Cover image proxy - avoids CORS/mixed-content issues
       const imgUrl = url.searchParams.get("url") ?? "";
-      if (!imgUrl || !imgUrl.startsWith("http")) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ error: "missing or invalid url" }));
+      if (!isAllowedCoverUrl(imgUrl)) {
+        res.statusCode = 403;
+        res.end(JSON.stringify({ error: "cover url not allowed" }));
         return;
       }
       try {
