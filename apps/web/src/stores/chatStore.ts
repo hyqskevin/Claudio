@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { QueueItem, StructuredReply } from "../api/client";
 import { api } from "../api/client";
 import { useToastStore } from "./toastStore";
+import { usePlayerStore } from "./playerStore";
 import { speak } from "../utils/voiceSynth";
 
 export interface ChatMessage {
@@ -116,6 +117,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                     if (data.type === "command") {
                         useToastStore.getState().addToast(data.message || "已执行", "success");
+                        // Execute command locally so browser AudioPlayer actually changes
+                        const player = usePlayerStore.getState();
+                        switch (data.action) {
+                            case "next":
+                                player.next();
+                                break;
+                            case "prev":
+                                player.previous();
+                                break;
+                            case "pause":
+                            case "play":
+                                player.togglePlay();
+                                break;
+                            case "shuffle":
+                                player.toggleShuffle();
+                                break;
+                            case "repeat":
+                                player.cycleRepeat();
+                                break;
+                        }
                     } else if (data.type === "search" && data.results) {
                         // Show search results as AI message with songs
                         const songs: RecommendedSong[] = data.results.map((r: { id: string; title: string; artist: string; coverUrl?: string }) => ({

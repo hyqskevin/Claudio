@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS queue_items (
   plan_id TEXT,
   type TEXT NOT NULL,
   song_id TEXT,
+  title TEXT,
+  artist TEXT,
+  cover_url TEXT,
   tts_text TEXT,
   audio_url TEXT,
   reason TEXT,
@@ -99,6 +102,7 @@ CREATE TABLE IF NOT EXISTS playback_state (
   queue_data TEXT,
   queue_index INTEGER DEFAULT 0,
   play_mode TEXT DEFAULT 'off',
+  shuffle INTEGER DEFAULT 0,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR IGNORE INTO playback_state (id) VALUES (1);

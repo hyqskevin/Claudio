@@ -11,15 +11,43 @@ let db: Database.Database | null = null;
 export function getDb(): Database.Database {
   if (db) return db;
 
-  const dataDir = join(__dirname, "../../data");
-  mkdirSync(dataDir, { recursive: true });
+  const dbUrl = process.env.DATABASE_URL ?? "";
+  let dbPath: string;
 
-  db = new Database(join(dataDir, "ai-radio.sqlite"));
+  if (dbUrl.startsWith("file:")) {
+    dbPath = dbUrl.slice(5);
+    // Ensure parent directory exists
+    const parentDir = dirname(dbPath);
+    if (parentDir && parentDir !== ".") {
+      mkdirSync(parentDir, { recursive: true });
+    }
+  } else {
+    const dataDir = join(__dirname, "../../data");
+    mkdirSync(dataDir, { recursive: true });
+    dbPath = join(dataDir, "ai-radio.sqlite");
+  }
+
+  db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
   const schema = readFileSync(join(__dirname, "schema.sql"), "utf-8");
   db.exec(schema);
+
+  // Migration: add missing columns to existing tables
+  const migrations = [
+    "ALTER TABLE playback_state ADD COLUMN shuffle INTEGER DEFAULT 0",
+    "ALTER TABLE queue_items ADD COLUMN title TEXT",
+    "ALTER TABLE queue_items ADD COLUMN artist TEXT",
+    "ALTER TABLE queue_items ADD COLUMN cover_url TEXT",
+  ];
+  for (const sql of migrations) {
+    try {
+      db.exec(sql);
+    } catch {
+      // Column already exists — ignore
+    }
+  }
 
   return db;
 }

@@ -114,7 +114,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
   });
 
   wsClient.on("queue_updated", (payload) => {
-    set({ queue: payload as QueueItem[] });
+    const data = payload as { items: QueueItem[] };
+    set({ queue: data.items ?? (payload as QueueItem[]) });
   });
 
   wsClient.on("plan_started", () => {
@@ -508,8 +509,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
 
         // Map server repeat mode to client
         let repeatMode: RepeatMode = "off";
-        if (state.play_mode === "one") repeatMode = "one";
-        else if (state.play_mode === "all") repeatMode = "all";
+        if (state.playMode === "one") repeatMode = "one";
+        else if (state.playMode === "all") repeatMode = "all";
 
         set({
           nowPlaying: restored,
@@ -534,7 +535,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
           const { nowPlaying, queue, repeatMode, shuffle, progressMs } = get();
-          const play_mode = repeatMode === "one" ? "one" : repeatMode === "all" ? "all" : "off";
+          const playMode = repeatMode === "one" ? "one" : repeatMode === "all" ? "all" : "off";
           const queueIndex = nowPlaying ? queue.findIndex(q => q.id === nowPlaying.id) : 0;
           api.savePlaybackState({
             currentSongId: nowPlaying?.songId,
@@ -544,7 +545,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
             currentSongCover: nowPlaying?.coverUrl,
             queueData: JSON.stringify(queue.map(q => ({ id: q.id, songId: q.songId, title: q.title, artist: q.artist, coverUrl: q.coverUrl }))),
             queueIndex: queueIndex >= 0 ? queueIndex : 0,
-            play_mode,
+            playMode,
             shuffle,
             progressSeconds: Math.floor(progressMs / 1000),
           });

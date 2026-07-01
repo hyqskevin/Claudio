@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { enrichPlanItems } from "../helpers/plan-enrich.js";
-import { insertPlanItems, getQueueItems } from "../db/queue.repo.js";
+import { insertPlanItems, getQueueItemsWithMeta, serializeQueueItem } from "../db/queue.repo.js";
 import { broadcast } from "./stream.js";
 
 const PlanRequestSchema = z.object({
@@ -47,7 +47,7 @@ export async function planRoutes(app: FastifyInstance) {
     );
 
     broadcast("plan_finished", { planId });
-    broadcast("queue_updated", getQueueItems());
+    broadcast("queue_updated", { items: getQueueItemsWithMeta().map(serializeQueueItem) });
 
     return {
       planId,
