@@ -38,8 +38,14 @@ export default function SettingsPage() {
     debounceRef.current = setTimeout(async () => {
       setSaving(true);
       try {
-        const newSettings = { ...settings, [key]: value };
-        await api.putSettings(newSettings);
+        // Strip mask sentinels so we don't overwrite real secrets with placeholder text
+        const payload: Record<string, string> = {};
+        for (const [k, v] of Object.entries({ ...settings, [key]: value })) {
+          if (v !== "***已配置***" && v !== undefined) {
+            payload[k] = v;
+          }
+        }
+        await api.putSettings(payload);
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
       } catch (err) {
